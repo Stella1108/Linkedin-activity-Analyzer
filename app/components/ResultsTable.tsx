@@ -2,10 +2,13 @@
 
 import { useState, useMemo } from 'react';
 import {
-  useTable,
-  useSortBy,
-  Column,
-} from 'react-table';
+  useReactTable,
+  getCoreRowModel,
+  getSortedRowModel,
+  SortingState,
+  ColumnDef,
+  flexRender,
+} from '@tanstack/react-table';
 import { LikeData, CommentData, PostData } from '@/lib/types';
 import { format } from 'date-fns';
 import { Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Users, MessageSquare } from 'lucide-react';
@@ -76,12 +79,14 @@ const LikesTable = ({ data }: { data: LikeData[] }) => {
     totalItems,
   } = usePaginationHook(data, 10);
 
-  const columns = useMemo<Column<LikeData>[]>(
+  const [sorting, setSorting] = useState<SortingState>([]);
+
+  const columns = useMemo<ColumnDef<LikeData>[]>(
     () => [
       {
-        Header: 'Name',
-        accessor: 'name',
-        Cell: ({ row, value }: { row: any; value: string }) => (
+        accessorKey: 'name',
+        header: 'Name',
+        cell: ({ row, getValue }) => (
           <a
             href={row.original.profileUrl}
             target="_blank"
@@ -90,18 +95,18 @@ const LikesTable = ({ data }: { data: LikeData[] }) => {
           >
             <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
               <span className="text-blue-600 font-semibold text-sm">
-                {value?.split(' ').map(n => n[0]).join('').toUpperCase() || ''}
+                {getValue<string>()?.split(' ').map(n => n[0]).join('').toUpperCase() || ''}
               </span>
             </div>
-            <span>{value || 'N/A'}</span>
+            <span>{getValue<string>() || 'N/A'}</span>
           </a>
         ),
       },
       {
-        Header: 'Title & Company',
-        accessor: 'headline',
-        Cell: ({ value }: { value?: string }) => {
-          // Extract title and company from headline
+        accessorKey: 'headline',
+        header: 'Title & Company',
+        cell: ({ getValue }) => {
+          const value = getValue<string>();
           let title = value || '';
           let company = '';
           
@@ -124,67 +129,69 @@ const LikesTable = ({ data }: { data: LikeData[] }) => {
         },
       },
       {
-        Header: 'Location',
-        accessor: 'location',
-        Cell: ({ value }: { value?: string }) => (
-          <span className="text-gray-500">{value || 'N/A'}</span>
+        accessorKey: 'location',
+        header: 'Location',
+        cell: ({ getValue }) => (
+          <span className="text-gray-500">{getValue<string>() || 'N/A'}</span>
         ),
       },
       {
-        Header: 'Liked At',
-        accessor: 'likedAt',
-        Cell: ({ value }: { value?: string }) => (
-          <div className="text-sm">
-            <div className="text-gray-500">
-              {value ? format(new Date(value), 'MMM dd, yyyy') : 'N/A'}
-            </div>
-            {value && (
-              <div className="text-xs text-gray-400">
-                {format(new Date(value), 'hh:mm a')}
+        accessorKey: 'likedAt',
+        header: 'Liked At',
+        cell: ({ getValue }) => {
+          const value = getValue<string>();
+          return (
+            <div className="text-sm">
+              <div className="text-gray-500">
+                {value ? format(new Date(value), 'MMM dd, yyyy') : 'N/A'}
               </div>
-            )}
-          </div>
-        ),
+              {value && (
+                <div className="text-xs text-gray-400">
+                  {format(new Date(value), 'hh:mm a')}
+                </div>
+              )}
+            </div>
+          );
+        },
       },
     ],
     []
   );
 
-  const {
-    getTableProps,
-    getTableBodyProps,
-    headerGroups,
-    rows,
-    prepareRow,
-  } = useTable(
-    {
-      columns,
-      data: paginatedData,
+  const table = useReactTable({
+    data: paginatedData,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
+    state: {
+      sorting,
     },
-    useSortBy
-  );
+  });
 
   return (
     <>
       <div className="overflow-x-auto border border-gray-200 rounded-lg">
-        <table {...getTableProps()} className="min-w-full divide-y divide-gray-200">
+        <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gradient-to-r from-gray-50 to-blue-50">
-            {headerGroups.map((headerGroup) => (
-              <tr {...headerGroup.getHeaderGroupProps()} key={headerGroup.id}>
-                {headerGroup.headers.map((column: any) => (
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
                   <th
-                    {...column.getHeaderProps(column.getSortByToggleProps())}
+                    key={header.id}
                     className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider"
-                    key={column.id}
+                    onClick={header.column.getToggleSortingHandler()}
                   >
-                    <div className="flex items-center">
-                      {column.render('Header')}
+                    <div className="flex items-center cursor-pointer">
+                      {flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
                       <span className="ml-1">
-                        {column.isSorted
-                          ? column.isSortedDesc
-                            ? ' ▼'
-                            : ' ▲'
-                          : ''}
+                        {{
+                          asc: ' ▲',
+                          desc: ' ▼',
+                        }[header.column.getIsSorted() as string] ?? ''}
                       </span>
                     </div>
                   </th>
@@ -192,31 +199,26 @@ const LikesTable = ({ data }: { data: LikeData[] }) => {
               </tr>
             ))}
           </thead>
-          <tbody
-            {...getTableBodyProps()}
-            className="bg-white divide-y divide-gray-200"
-          >
-            {rows.length > 0 ? (
-              rows.map((row) => {
-                prepareRow(row);
-                return (
-                  <tr 
-                    {...row.getRowProps()} 
-                    key={row.id}
-                    className="hover:bg-blue-50 transition-colors duration-150"
-                  >
-                    {row.cells.map((cell) => (
-                      <td
-                        {...cell.getCellProps()}
-                        className="px-6 py-4 whitespace-nowrap"
-                        key={cell.column.id}
-                      >
-                        {cell.render('Cell')}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })
+          <tbody className="bg-white divide-y divide-gray-200">
+            {table.getRowModel().rows.length > 0 ? (
+              table.getRowModel().rows.map((row) => (
+                <tr 
+                  key={row.id}
+                  className="hover:bg-blue-50 transition-colors duration-150"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <td
+                      key={cell.id}
+                      className="px-6 py-4 whitespace-nowrap"
+                    >
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext()
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))
             ) : (
               <tr>
                 <td
@@ -318,17 +320,19 @@ const CommentsTable = ({ data }: { data: CommentData[] }) => {
     totalItems,
   } = usePaginationHook(data, 10);
 
-  const columns = useMemo<Column<CommentData>[]>(
+  const [sorting, setSorting] = useState<SortingState>([]);
+
+  const columns = useMemo<ColumnDef<CommentData>[]>(
     () => [
       {
-        Header: 'Commenter',
-        accessor: 'name',
-        Cell: ({ row, value }: { row: any; value: string }) => (
+        accessorKey: 'name',
+        header: 'Commenter',
+        cell: ({ row, getValue }) => (
           <div className="flex items-center space-x-3">
             <div className="flex-shrink-0">
               <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
                 <span className="text-indigo-600 font-semibold text-sm">
-                  {value?.split(' ').map(n => n[0]).join('').toUpperCase() || ''}
+                  {getValue<string>()?.split(' ').map(n => n[0]).join('').toUpperCase() || ''}
                 </span>
               </div>
             </div>
@@ -339,7 +343,7 @@ const CommentsTable = ({ data }: { data: CommentData[] }) => {
                 rel="noopener noreferrer"
                 className="text-blue-600 hover:underline font-medium block"
               >
-                {value || 'N/A'}
+                {getValue<string>() || 'N/A'}
               </a>
               <div className="text-sm text-gray-500">
                 {row.original.headline?.split(' at ')[0] || ''}
@@ -349,18 +353,18 @@ const CommentsTable = ({ data }: { data: CommentData[] }) => {
         ),
       },
       {
-        Header: 'Comment',
-        accessor: 'comment',
-        Cell: ({ value }: { value: string }) => (
+        accessorKey: 'comment',
+        header: 'Comment',
+        cell: ({ getValue }) => (
           <div className="max-w-2xl">
-            <p className="text-gray-700 line-clamp-3">{value || 'No comment text'}</p>
+            <p className="text-gray-700 line-clamp-3">{getValue<string>() || 'No comment text'}</p>
           </div>
         ),
       },
       {
-        Header: 'Company',
         id: 'company',
-        Cell: ({ row }: { row: any }) => {
+        header: 'Company',
+        cell: ({ row }) => {
           const headline = row.original.headline || '';
           let company = '';
           
@@ -385,9 +389,9 @@ const CommentsTable = ({ data }: { data: CommentData[] }) => {
         },
       },
       {
-        Header: 'Stats',
         id: 'stats',
-        Cell: ({ row }: { row: any }) => (
+        header: 'Stats',
+        cell: ({ row }) => (
           <div className="text-right">
             <div className="flex items-center justify-end space-x-4">
               <div className="text-center">
@@ -412,41 +416,40 @@ const CommentsTable = ({ data }: { data: CommentData[] }) => {
     []
   );
 
-  const {
-    getTableProps,
-    getTableBodyProps,
-    headerGroups,
-    rows,
-    prepareRow,
-  } = useTable(
-    {
-      columns,
-      data: paginatedData,
+  const table = useReactTable({
+    data: paginatedData,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    onSortingChange: setSorting,
+    state: {
+      sorting,
     },
-    useSortBy
-  );
+  });
 
   return (
     <>
       <div className="overflow-x-auto border border-gray-200 rounded-lg">
-        <table {...getTableProps()} className="min-w-full divide-y divide-gray-200">
+        <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gradient-to-r from-gray-50 to-indigo-50">
-            {headerGroups.map((headerGroup) => (
-              <tr {...headerGroup.getHeaderGroupProps()} key={headerGroup.id}>
-                {headerGroup.headers.map((column: any) => (
+            {table.getHeaderGroups().map((headerGroup) => (
+              <tr key={headerGroup.id}>
+                {headerGroup.headers.map((header) => (
                   <th
-                    {...column.getHeaderProps(column.getSortByToggleProps())}
+                    key={header.id}
                     className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider"
-                    key={column.id}
+                    onClick={header.column.getToggleSortingHandler()}
                   >
-                    <div className="flex items-center">
-                      {column.render('Header')}
+                    <div className="flex items-center cursor-pointer">
+                      {flexRender(
+                        header.column.columnDef.header,
+                        header.getContext()
+                      )}
                       <span className="ml-1">
-                        {column.isSorted
-                          ? column.isSortedDesc
-                            ? ' ▼'
-                            : ' ▲'
-                          : ''}
+                        {{
+                          asc: ' ▲',
+                          desc: ' ▼',
+                        }[header.column.getIsSorted() as string] ?? ''}
                       </span>
                     </div>
                   </th>
@@ -454,31 +457,26 @@ const CommentsTable = ({ data }: { data: CommentData[] }) => {
               </tr>
             ))}
           </thead>
-          <tbody
-            {...getTableBodyProps()}
-            className="bg-white divide-y divide-gray-200"
-          >
-            {rows.length > 0 ? (
-              rows.map((row) => {
-                prepareRow(row);
-                return (
-                  <tr 
-                    {...row.getRowProps()} 
-                    key={row.id}
-                    className="hover:bg-indigo-50 transition-colors duration-150"
-                  >
-                    {row.cells.map((cell) => (
-                      <td
-                        {...cell.getCellProps()}
-                        className="px-6 py-4"
-                        key={cell.column.id}
-                      >
-                        {cell.render('Cell')}
-                      </td>
-                    ))}
-                  </tr>
-                );
-              })
+          <tbody className="bg-white divide-y divide-gray-200">
+            {table.getRowModel().rows.length > 0 ? (
+              table.getRowModel().rows.map((row) => (
+                <tr 
+                  key={row.id}
+                  className="hover:bg-indigo-50 transition-colors duration-150"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <td
+                      key={cell.id}
+                      className="px-6 py-4"
+                    >
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext()
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))
             ) : (
               <tr>
                 <td
@@ -564,6 +562,10 @@ const CommentsTable = ({ data }: { data: CommentData[] }) => {
     </>
   );
 };
+
+// The rest of your ResultsTable component remains the same...
+// Keep all the export functions and the main ResultsTable function as they are
+// Only replace the LikesTable and CommentsTable components above
 
 export default function ResultsTable({ data }: ResultsTableProps) {
   const [activeTab, setActiveTab] = useState<'likes' | 'comments' | 'post'>('likes');

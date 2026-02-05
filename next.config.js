@@ -8,12 +8,13 @@ const nextConfig = {
     'puppeteer-extra-plugin-stealth'
   ],
   
-  // Updated turbopack configuration
-  experimental: {
-    turbopack: {
-      root: __dirname, // Add this to fix the lockfile warning
-    },
+  // turbopack should be at root level (not in experimental)
+  turbopack: {
+    root: __dirname, // Add this to fix the lockfile warning
   },
+  
+  // Keep experimental object for other experimental features if needed
+  experimental: {},
   
   webpack: (config, { isServer }) => {
     if (isServer) {
