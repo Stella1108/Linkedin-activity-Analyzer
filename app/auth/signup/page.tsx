@@ -353,20 +353,6 @@ export default function SignUpPage() {
         </div>
 
         {/* Features */}
-        <div className="mt-8 grid grid-cols-3 gap-4">
-          <div className="text-center p-3 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl">
-            <div className="text-sm font-semibold text-blue-600">Secure</div>
-            <div className="text-xs text-gray-500">Encrypted</div>
-          </div>
-          <div className="text-center p-3 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl">
-            <div className="text-sm font-semibold text-indigo-600">Free</div>
-            <div className="text-xs text-gray-500">No credit card</div>
-          </div>
-          <div className="text-center p-3 bg-gradient-to-br from-green-50 to-green-100 rounded-xl">
-            <div className="text-sm font-semibold text-green-600">Instant</div>
-            <div className="text-xs text-gray-500">Quick setup</div>
-          </div>
-        </div>
       </div>
     </div>
   );

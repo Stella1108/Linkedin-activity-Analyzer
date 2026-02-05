@@ -19,10 +19,12 @@ export default function LoginPage() {
 
   // Check if there's a success message from signup redirect
   useState(() => {
-    const params = new URLSearchParams(window.location.search);
-    const signupSuccess = params.get('signupSuccess');
-    if (signupSuccess === 'true') {
-      setSuccess('Account created successfully! Please login with your credentials.');
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const signupSuccess = params.get('signupSuccess');
+      if (signupSuccess === 'true') {
+        setSuccess('Account created successfully! Please login with your credentials.');
+      }
     }
   });
 
