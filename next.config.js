@@ -1,14 +1,18 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  turbopack: {}, // Add this line
+  // Moved serverComponentsExternalPackages from experimental to root level
+  serverExternalPackages: [
+    'puppeteer', 
+    'puppeteer-core', 
+    'puppeteer-extra', 
+    'puppeteer-extra-plugin-stealth'
+  ],
   
+  // Updated turbopack configuration
   experimental: {
-    serverComponentsExternalPackages: [
-      'puppeteer', 
-      'puppeteer-core', 
-      'puppeteer-extra', 
-      'puppeteer-extra-plugin-stealth'
-    ],
+    turbopack: {
+      root: __dirname, // Add this to fix the lockfile warning
+    },
   },
   
   webpack: (config, { isServer }) => {
