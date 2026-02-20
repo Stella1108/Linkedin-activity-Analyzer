@@ -1,304 +1,222 @@
+// components/AnalyzeForm.tsx
+
 'use client';
 
 import { useState } from 'react';
 import { AnalysisRequest } from '@/lib/types';
-import { Link, Settings, Sparkles, Shield, AlertCircle } from 'lucide-react';
 
 interface AnalyzeFormProps {
-  onAnalyze: (data: AnalysisRequest) => void;
+  onAnalyze: (request: AnalysisRequest) => void;
   isLoading: boolean;
   hasCookies: boolean;
 }
 
 export default function AnalyzeForm({ onAnalyze, isLoading, hasCookies }: AnalyzeFormProps) {
-  const [url, setUrl] = useState('');
-  const [type, setType] = useState<'profile' | 'post'>('profile');
-  const [scrapeLikes, setScrapeLikes] = useState(true);
-  const [scrapeComments, setScrapeComments] = useState(true);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [formData, setFormData] = useState<Omit<AnalysisRequest, 'maxLikes'> & { maxLikes: string }>({
+    url: '',
+    type: 'auto',
+    maxLikes: '20', // Keep as string in state
+    keepOpen: false,
+    format: 'json'
+  });
+  const [error, setError] = useState<string>('');
+
+  const validateUrl = (url: string) => {
+    if (!url.trim()) {
+      setError('Please enter a LinkedIn URL');
+      return false;
+    }
+    
+    if (!url.includes('linkedin.com')) {
+      setError('Please enter a valid LinkedIn URL');
+      return false;
+    }
+    
+    return true;
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setError('');
     
+    if (!validateUrl(formData.url)) {
+      return;
+    }
+
     if (!hasCookies) {
-      alert('LinkedIn authentication required. Please add li_at cookies to the database first.');
+      setError('No active LinkedIn cookies found. Please add cookies to the database first.');
       return;
     }
+
+    // Convert maxLikes from string to number when submitting
+    const requestData: AnalysisRequest = {
+      ...formData,
+      maxLikes: parseInt(formData.maxLikes) || 20
+    };
+
+    onAnalyze(requestData);
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value, type } = e.target;
     
-    if (!url.trim()) {
-      alert('Please enter a LinkedIn URL');
-      return;
+    if (type === 'checkbox') {
+      const checkbox = e.target as HTMLInputElement;
+      setFormData({
+        ...formData,
+        [name]: checkbox.checked
+      });
+    } else {
+      setFormData({
+        ...formData,
+        [name]: value
+      });
     }
-
-    onAnalyze({
-      url: url.trim(),
-      type,
-      scrapeLikes,
-      scrapeComments
-    });
-  };
-
-  const detectType = (url: string) => {
-    if (url.includes('/in/')) {
-      setType('profile');
-    } else if (url.includes('/post/') || url.includes('/activity/')) {
-      setType('post');
-    }
-  };
-
-  const exampleUrls = {
-    profile: 'https://www.linkedin.com/in/satyanadella/',
-    post: 'https://www.linkedin.com/posts/microsoft_announcement-activity-1234567890'
-  };
-
-  const loadExample = (exampleType: 'profile' | 'post') => {
-    setUrl(exampleUrls[exampleType]);
-    setType(exampleType);
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-lg border border-gray-100 overflow-hidden">
-      <div className="px-8 pt-8">
-        <div className="flex items-center justify-between mb-6">
+    <form onSubmit={handleSubmit}>
+      <div className="space-y-6">
+        {/* URL Input */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            LinkedIn URL <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="text"
+            name="url"
+            value={formData.url}
+            onChange={handleInputChange}
+            placeholder="https://www.linkedin.com/in/username or https://www.linkedin.com/posts/..."
+            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+            disabled={isLoading}
+            required
+          />
+          <p className="mt-2 text-sm text-gray-500">
+            Supports profiles (/in/username) and posts (/posts/ or /activity/)
+          </p>
+        </div>
+
+        {/* Advanced Options */}
+        <div className="grid md:grid-cols-2 gap-6">
           <div>
-            <h3 className="text-2xl font-bold text-gray-900">Analyze LinkedIn Content</h3>
-            <p className="text-gray-600 mt-1">Get detailed engagement analytics using authenticated cookies</p>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Analysis Type
+            </label>
+            <select
+              name="type"
+              value={formData.type}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              disabled={isLoading}
+            >
+              <option value="auto">Auto-detect</option>
+              <option value="profile">Profile Analysis</option>
+              <option value="post">Post Analysis</option>
+            </select>
           </div>
-          <div className="flex items-center space-x-2">
-            {hasCookies ? (
-              <div className="flex items-center space-x-1 px-3 py-1 bg-gradient-to-r from-green-50 to-emerald-50 rounded-full">
-                <Shield className="h-4 w-4 text-green-600" />
-                <span className="text-sm font-medium text-green-600">Authenticated</span>
-              </div>
-            ) : (
-              <div className="flex items-center space-x-1 px-3 py-1 bg-gradient-to-r from-amber-50 to-orange-50 rounded-full">
-                <AlertCircle className="h-4 w-4 text-amber-600" />
-                <span className="text-sm font-medium text-amber-600">No Cookies</span>
-              </div>
-            )}
-            <Sparkles className="h-5 w-5 text-blue-500" />
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Max Likes to Extract
+            </label>
+            <input
+              type="number"
+              name="maxLikes"
+              value={formData.maxLikes}
+              onChange={handleInputChange}
+              min="1"
+              max="100"
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              disabled={isLoading}
+            />
+            <p className="mt-1 text-xs text-gray-500">Maximum number of profiles to extract (1-100)</p>
           </div>
         </div>
 
-        {!hasCookies && (
-          <div className="mb-6 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-4">
-            <div className="flex items-start space-x-3">
-              <AlertCircle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-              <div>
-                <h4 className="font-medium text-amber-800 mb-1">LinkedIn Authentication Required</h4>
-                <p className="text-sm text-amber-700">
-                  You need to add LinkedIn cookies to analyze profiles. Click "Manage Cookies" in the navigation to add your li_at cookie.
-                </p>
-              </div>
-            </div>
+        <div className="grid md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Output Format
+            </label>
+            <select
+              name="format"
+              value={formData.format}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              disabled={isLoading}
+            >
+              <option value="json">JSON (Web View)</option>
+              <option value="csv">CSV (Download)</option>
+            </select>
+          </div>
+          
+          <div className="flex items-center space-x-3 pt-6">
+            <input
+              type="checkbox"
+              id="keepOpen"
+              name="keepOpen"
+              checked={formData.keepOpen}
+              onChange={handleInputChange}
+              className="h-5 w-5 text-blue-600 rounded focus:ring-blue-500"
+              disabled={isLoading}
+            />
+            <label htmlFor="keepOpen" className="text-sm text-gray-700">
+              Keep browser open for debugging
+            </label>
+          </div>
+        </div>
+
+        {/* Error Message */}
+        {error && (
+          <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+            <p className="text-red-700 text-sm">{error}</p>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* URL Input */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="block text-sm font-semibold text-gray-900">
-                LinkedIn URL
-              </label>
-              <div className="flex space-x-2">
-                <button
-                  type="button"
-                  onClick={() => loadExample('profile')}
-                  className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
-                >
-                  Profile Example
-                </button>
-                <button
-                  type="button"
-                  onClick={() => loadExample('post')}
-                  className="text-xs px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
-                >
-                  Post Example
-                </button>
-              </div>
-            </div>
-            <div className="relative">
-              <div className="absolute left-4 top-1/2 transform -translate-y-1/2">
-                <Link className="h-5 w-5 text-gray-400" />
-              </div>
-              <input
-                type="text"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  detectType(e.target.value);
-                }}
-                placeholder="https://www.linkedin.com/in/username/ or https://www.linkedin.com/posts/..."
-                className={`w-full pl-12 pr-4 py-4 border rounded-xl focus:ring-2 outline-none transition-all duration-200 ${
-                  hasCookies 
-                    ? 'bg-gray-50 border-gray-200 focus:ring-blue-500 focus:border-blue-500 hover:border-gray-300' 
-                    : 'bg-gray-100 border-gray-300 text-gray-500 cursor-not-allowed'
-                }`}
-                disabled={!hasCookies || isLoading}
-              />
-            </div>
-            <p className="text-sm text-gray-500">
-              Enter any LinkedIn profile or post URL to analyze (requires authenticated cookies)
+        {/* Cookie Status Warning */}
+        {!hasCookies && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <p className="text-amber-800 text-sm font-medium mb-1">⚠️ No Active LinkedIn Cookies</p>
+            <p className="text-amber-700 text-sm">
+              Please add valid LinkedIn cookies to the database before starting analysis.
             </p>
           </div>
+        )}
 
-          {/* URL Type Selection */}
-          <div className="space-y-3">
-            <label className="block text-sm font-semibold text-gray-900">
-              Content Type
-            </label>
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                type="button"
-                onClick={() => setType('profile')}
-                disabled={!hasCookies || isLoading}
-                className={`p-4 rounded-xl border-2 transition-all duration-200 ${
-                  type === 'profile'
-                    ? 'border-blue-500 bg-blue-50'
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                } ${(!hasCookies || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <div className="flex items-center space-x-3">
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                    type === 'profile' ? 'border-blue-500 bg-blue-500' : 'border-gray-300'
-                  }`}>
-                    {type === 'profile' && <div className="w-2 h-2 bg-white rounded-full"></div>}
-                  </div>
-                  <div className="text-left">
-                    <div className="font-medium text-gray-900">Profile</div>
-                    <div className="text-sm text-gray-500">Analyze user profile activity</div>
-                  </div>
-                </div>
-              </button>
-              
-              <button
-                type="button"
-                onClick={() => setType('post')}
-                disabled={!hasCookies || isLoading}
-                className={`p-4 rounded-xl border-2 transition-all duration-200 ${
-                  type === 'post'
-                    ? 'border-indigo-500 bg-indigo-50'
-                    : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
-                } ${(!hasCookies || isLoading) ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                <div className="flex items-center space-x-3">
-                  <div className={`w-4 h-4 rounded-full border-2 flex items-center justify-center ${
-                    type === 'post' ? 'border-indigo-500 bg-indigo-500' : 'border-gray-300'
-                  }`}>
-                    {type === 'post' && <div className="w-2 h-2 bg-white rounded-full"></div>}
-                  </div>
-                  <div className="text-left">
-                    <div className="font-medium text-gray-900">Post</div>
-                    <div className="text-sm text-gray-500">Analyze specific post engagement</div>
-                  </div>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Advanced Options */}
-          <div className="space-y-4">
-            <button
-              type="button"
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              disabled={!hasCookies}
-              className={`flex items-center space-x-2 text-sm font-medium transition-colors ${
-                hasCookies ? 'text-gray-700 hover:text-blue-600' : 'text-gray-400 cursor-not-allowed'
-              }`}
-            >
-              <Settings className="h-4 w-4" />
-              <span>{showAdvanced ? 'Hide' : 'Show'} Advanced Options</span>
-            </button>
-            
-            {showAdvanced && hasCookies && (
-              <div className="space-y-4 p-4 bg-gray-50 rounded-xl border border-gray-200 animate-fade-in">
-                <div className="space-y-3">
-                  <label className="block text-sm font-semibold text-gray-900">
-                    Data Collection
-                  </label>
-                  <div className="space-y-3">
-                    <label className="flex items-center space-x-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={scrapeLikes}
-                        onChange={() => setScrapeLikes(!scrapeLikes)}
-                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-                        disabled={!hasCookies || isLoading}
-                      />
-                      <div>
-                        <div className="font-medium text-gray-900">Collect Likes Data</div>
-                        <div className="text-sm text-gray-500">Extract information about people who liked the content</div>
-                      </div>
-                    </label>
-                    
-                    <label className="flex items-center space-x-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-gray-300 transition-colors cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={scrapeComments}
-                        onChange={() => setScrapeComments(!scrapeComments)}
-                        className="w-4 h-4 text-indigo-600 bg-gray-100 border-gray-300 rounded focus:ring-indigo-500"
-                        disabled={!hasCookies || isLoading}
-                      />
-                      <div>
-                        <div className="font-medium text-gray-900">Collect Comments Data</div>
-                        <div className="text-sm text-gray-500">Extract comment content and user information</div>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Submit Button */}
+        {/* Submit Button */}
+        <div>
           <button
             type="submit"
-            disabled={!hasCookies || isLoading || !url}
-            className={`w-full py-4 px-6 rounded-xl font-semibold text-white transition-all duration-300 transform ${
-              !hasCookies || isLoading || !url
-                ? 'bg-gray-300 cursor-not-allowed'
-                : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:shadow-xl hover:shadow-blue-500/25 hover:scale-[1.02] active:scale-[0.98]'
-            }`}
+            disabled={isLoading || !hasCookies}
+            className={`w-full px-6 py-4 font-medium rounded-xl transition-all duration-300 flex items-center justify-center space-x-2 ${
+              hasCookies 
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:shadow-xl hover:scale-[1.02]' 
+                : 'bg-gray-100 text-gray-400 cursor-not-allowed'
+            } ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
           >
-            {!hasCookies ? (
-              <div className="flex items-center justify-center space-x-3">
-                <AlertCircle className="h-5 w-5" />
-                <span>Add Cookies First</span>
-              </div>
-            ) : isLoading ? (
-              <div className="flex items-center justify-center space-x-3">
+            {isLoading ? (
+              <>
                 <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                <span>Authenticated Analysis...</span>
-              </div>
+                <span>Analyzing...</span>
+              </>
             ) : (
-              <div className="flex items-center justify-center space-x-3">
-                <Sparkles className="h-5 w-5" />
-                <span>Start Authenticated Analysis</span>
-              </div>
+              <>
+                <span>{hasCookies ? 'Start Analysis' : 'Add Cookies First'}</span>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+              </>
             )}
           </button>
-        </form>
-      </div>
-      
-      {/* Tips */}
-      <div className="mt-8 border-t border-gray-100 bg-gray-50 px-8 py-6 rounded-b-2xl">
-        <div className="flex items-start space-x-3">
-          <div className="flex-shrink-0 mt-1">
-            <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-              <Shield className="h-4 w-4 text-blue-600" />
-            </div>
-          </div>
-          <div>
-            <h4 className="font-medium text-gray-900 mb-1">Authentication Required</h4>
-            <p className="text-sm text-gray-600">
-              This tool uses real LinkedIn cookies (li_at) for authenticated scraping. 
-              Analysis may take 30-60 seconds depending on engagement. 
-              <a href="/admin" className="text-blue-600 hover:underline ml-1">Manage cookies here</a>.
+          
+          {hasCookies && (
+            <p className="mt-3 text-sm text-gray-500 text-center">
+              This process opens a Chrome browser and may take 5-15 minutes depending on the profile.
             </p>
-          </div>
+          )}
         </div>
       </div>
-    </div>
+    </form>
   );
 }

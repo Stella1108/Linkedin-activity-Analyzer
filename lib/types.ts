@@ -1,72 +1,108 @@
-// LinkedIn data types
-export interface LinkedInProfileData {
-  id: number;
-  name: string;
-  li_at: string;
-  jsessionid?: string;
-  bcookie?: string;
-  created_at: string;
-  updated_at: string;
-  is_active: boolean;
-}
-
 export interface LikeData {
   name: string;
-  profileUrl: string;
-  headline: string;
+  profileUrl?: string;
+  jobTitle?: string;
+  company?: string;
   location?: string;
-  connectionLevel?: string;
-  likedAt?: string;
+  connectionDegree?: string;
+  connectionLevel?: number;
+  likedAt: string;
+  postAuthor: string;
+  postContent: string;
 }
 
 export interface CommentData {
   name: string;
-  profileUrl: string;
-  headline: string;
-  comment: string;
-  commentedAt?: string;
-  likesCount?: number;
+  profileUrl?: string;
+  jobTitle?: string;
+  company?: string;
+  commentText: string;
+  commentedAt: string;
+  postAuthor: string;
+  postContent: string;
 }
 
 export interface PostData {
   author: string;
-  authorProfileUrl: string;
+  authorProfileUrl?: string;
   content: string;
-  postUrl: string;
+  postUrl?: string;
   postedAt: string;
   likesCount: number;
   commentsCount: number;
 }
 
+export interface LinkedInProfileData {
+  li_at: string;
+  name?: string;
+  email?: string;
+  is_active?: boolean;
+  updated_at?: string;
+  last_used?: string;
+}
+
 export interface ScrapeResult {
   success: boolean;
   data: {
-    post?: PostData;
     likes: LikeData[];
     comments: CommentData[];
     profileUrl: string;
     scrapedAt: string;
+    posts: PostData[];
+    post?: PostData;
   };
-  error?: string;
   message?: string;
+  error?: string;
+  duration?: string;
+  timestamp?: string;
+  statistics?: {
+    total_profiles: number;
+    total_comments: number;
+    total_posts: number;
+  };
+  sample?: any[];
 }
 
 export interface AnalysisRequest {
   url: string;
-  type: 'profile' | 'post';
-  scrapeLikes: boolean;
-  scrapeComments: boolean;
+  type?: 'post' | 'profile' | 'auto';
+  maxLikes?: number;
+  maxComments?: number;
+  keepOpen?: boolean;
+  format?: 'json' | 'csv';
 }
 
-// Cookie parameter type for Puppeteer
-export interface CookieParam {
-  name: string;
-  value: string;
-  domain?: string;
-  url?: string;
-  path?: string;
-  expires?: number;
-  httpOnly?: boolean;
-  secure?: boolean;
-  sameSite?: 'Strict' | 'Lax' | 'None';
+export interface CookieStatus {
+  hasCookies: boolean;
+  message: string;
+  lastUpdated: string | null;
+  cookieName?: string;
+  cookieCount?: number;
+}
+
+export interface AnalysisProgress {
+  message: string;
+  step: number;
+  totalSteps: number;
+  currentUrl: string;
+  browserVisible: boolean;
+}
+
+export interface AnalysisHistoryItem {
+  id: string;
+  created_at: string;
+  profile_url: string;
+  profile_name?: string;
+  type?: string;
+  success: boolean;
+  likes_count?: number;
+  comments_count?: number;
+  posts_count?: number;
+}
+
+export interface ResultsTableData {
+  likes: LikeData[];
+  comments: CommentData[];
+  posts: PostData[];
+  post?: PostData;
 }

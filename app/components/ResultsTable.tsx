@@ -1,873 +1,297 @@
 'use client';
 
-import { useState, useMemo } from 'react';
-import {
-  useReactTable,
-  getCoreRowModel,
-  getSortedRowModel,
-  SortingState,
-  ColumnDef,
-  flexRender,
-} from '@tanstack/react-table';
-import { LikeData, CommentData, PostData } from '@/lib/types';
-import { format } from 'date-fns';
-import { Download, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Users, MessageSquare } from 'lucide-react';
+import { Download, ExternalLink, User, Briefcase, Building2 } from 'lucide-react';
 
 interface ResultsTableProps {
   data: {
-    post?: PostData;
-    likes: LikeData[];
-    comments: CommentData[];
-    profileUrl: string;
-    scrapedAt: string;
+    likes: any[];
+    comments: any[];
+    posts: any[];
+    post?: any;
   };
 }
 
-// Custom pagination hook
-const usePaginationHook = <T,>(data: T[], itemsPerPage: number = 10) => {
-  const [currentPage, setCurrentPage] = useState(1);
-  const totalPages = Math.ceil(data.length / itemsPerPage);
-
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedData = data.slice(startIndex, endIndex);
-
-  const nextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(prev => prev + 1);
-    }
-  };
-
-  const prevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(prev => prev - 1);
-    }
-  };
-
-  const goToPage = (page: number) => {
-    const pageNumber = Math.max(1, Math.min(page, totalPages));
-    setCurrentPage(pageNumber);
-  };
-
-  return {
-    currentPage,
-    totalPages,
-    paginatedData,
-    nextPage,
-    prevPage,
-    goToPage,
-    hasNextPage: currentPage < totalPages,
-    hasPrevPage: currentPage > 1,
-    startItem: startIndex + 1,
-    endItem: Math.min(endIndex, data.length),
-    totalItems: data.length,
-  };
-};
-
-const LikesTable = ({ data }: { data: LikeData[] }) => {
-  const {
-    currentPage,
-    totalPages,
-    paginatedData,
-    nextPage,
-    prevPage,
-    goToPage,
-    hasNextPage,
-    hasPrevPage,
-    startItem,
-    endItem,
-    totalItems,
-  } = usePaginationHook(data, 10);
-
-  const [sorting, setSorting] = useState<SortingState>([]);
-
-  const columns = useMemo<ColumnDef<LikeData>[]>(
-    () => [
-      {
-        accessorKey: 'name',
-        header: 'Name',
-        cell: ({ row, getValue }) => (
-          <a
-            href={row.original.profileUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 hover:underline font-medium flex items-center space-x-2"
-          >
-            <div className="w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center">
-              <span className="text-blue-600 font-semibold text-sm">
-                {getValue<string>()?.split(' ').map(n => n[0]).join('').toUpperCase() || ''}
-              </span>
-            </div>
-            <span>{getValue<string>() || 'N/A'}</span>
-          </a>
-        ),
-      },
-      {
-        accessorKey: 'headline',
-        header: 'Title & Company',
-        cell: ({ getValue }) => {
-          const value = getValue<string>();
-          let title = value || '';
-          let company = '';
-          
-          if (value) {
-            const atIndex = value.indexOf(' at ');
-            if (atIndex > -1) {
-              title = value.substring(0, atIndex).trim();
-              company = value.substring(atIndex + 4).split(' · ')[0].trim();
-            }
-          }
-          
-          return (
-            <div>
-              <div className="font-medium text-gray-900">{title}</div>
-              {company && (
-                <div className="text-sm text-gray-600">{company}</div>
-              )}
-            </div>
-          );
-        },
-      },
-      {
-        accessorKey: 'location',
-        header: 'Location',
-        cell: ({ getValue }) => (
-          <span className="text-gray-500">{getValue<string>() || 'N/A'}</span>
-        ),
-      },
-      {
-        accessorKey: 'likedAt',
-        header: 'Liked At',
-        cell: ({ getValue }) => {
-          const value = getValue<string>();
-          return (
-            <div className="text-sm">
-              <div className="text-gray-500">
-                {value ? format(new Date(value), 'MMM dd, yyyy') : 'N/A'}
-              </div>
-              {value && (
-                <div className="text-xs text-gray-400">
-                  {format(new Date(value), 'hh:mm a')}
-                </div>
-              )}
-            </div>
-          );
-        },
-      },
-    ],
-    []
-  );
-
-  const table = useReactTable({
-    data: paginatedData,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    onSortingChange: setSorting,
-    state: {
-      sorting,
-    },
-  });
-
-  return (
-    <>
-      <div className="overflow-x-auto border border-gray-200 rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gradient-to-r from-gray-50 to-blue-50">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <th
-                    key={header.id}
-                    className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider"
-                    onClick={header.column.getToggleSortingHandler()}
-                  >
-                    <div className="flex items-center cursor-pointer">
-                      {flexRender(
-                        header.column.columnDef.header,
-                        header.getContext()
-                      )}
-                      <span className="ml-1">
-                        {{
-                          asc: ' ▲',
-                          desc: ' ▼',
-                        }[header.column.getIsSorted() as string] ?? ''}
-                      </span>
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {table.getRowModel().rows.length > 0 ? (
-              table.getRowModel().rows.map((row) => (
-                <tr 
-                  key={row.id}
-                  className="hover:bg-blue-50 transition-colors duration-150"
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td
-                      key={cell.id}
-                      className="px-6 py-4 whitespace-nowrap"
-                    >
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td
-                  colSpan={columns.length}
-                  className="px-6 py-8 text-center text-gray-500"
-                >
-                  <div className="flex flex-col items-center justify-center space-y-2">
-                    <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
-                      <Users className="h-6 w-6 text-gray-400" />
-                    </div>
-                    <div className="text-gray-600">No likes data available for this post</div>
-                    <div className="text-sm text-gray-400">Try analyzing a different LinkedIn URL</div>
-                  </div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Custom Pagination */}
-      {data.length > 10 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between mt-4 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
-          <div className="mb-3 sm:mb-0">
-            <p className="text-sm text-gray-700">
-              Showing <span className="font-semibold">{startItem}</span> to{' '}
-              <span className="font-semibold">{endItem}</span> of{' '}
-              <span className="font-semibold">{totalItems}</span> likes
-            </p>
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => goToPage(1)}
-                disabled={!hasPrevPage}
-                className="p-2 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="First page"
-              >
-                <ChevronsLeft className="h-4 w-4" />
-              </button>
-              <button
-                onClick={prevPage}
-                disabled={!hasPrevPage}
-                className="p-2 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Previous page"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              
-              <div className="flex items-center space-x-1">
-                <input
-                  type="number"
-                  min="1"
-                  max={totalPages}
-                  value={currentPage}
-                  onChange={(e) => goToPage(parseInt(e.target.value) || 1)}
-                  className="w-12 px-2 py-1 text-center border border-gray-300 rounded-md text-sm"
-                />
-                <span className="text-sm text-gray-600">of {totalPages}</span>
-              </div>
-              
-              <button
-                onClick={nextPage}
-                disabled={!hasNextPage}
-                className="p-2 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Next page"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => goToPage(totalPages)}
-                disabled={!hasNextPage}
-                className="p-2 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Last page"
-              >
-                <ChevronsRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
-const CommentsTable = ({ data }: { data: CommentData[] }) => {
-  const {
-    currentPage,
-    totalPages,
-    paginatedData,
-    nextPage,
-    prevPage,
-    goToPage,
-    hasNextPage,
-    hasPrevPage,
-    startItem,
-    endItem,
-    totalItems,
-  } = usePaginationHook(data, 10);
-
-  const [sorting, setSorting] = useState<SortingState>([]);
-
-  const columns = useMemo<ColumnDef<CommentData>[]>(
-    () => [
-      {
-        accessorKey: 'name',
-        header: 'Commenter',
-        cell: ({ row, getValue }) => (
-          <div className="flex items-center space-x-3">
-            <div className="flex-shrink-0">
-              <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
-                <span className="text-indigo-600 font-semibold text-sm">
-                  {getValue<string>()?.split(' ').map(n => n[0]).join('').toUpperCase() || ''}
-                </span>
-              </div>
-            </div>
-            <div>
-              <a
-                href={row.original.profileUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-blue-600 hover:underline font-medium block"
-              >
-                {getValue<string>() || 'N/A'}
-              </a>
-              <div className="text-sm text-gray-500">
-                {row.original.headline?.split(' at ')[0] || ''}
-              </div>
-            </div>
-          </div>
-        ),
-      },
-      {
-        accessorKey: 'comment',
-        header: 'Comment',
-        cell: ({ getValue }) => (
-          <div className="max-w-2xl">
-            <p className="text-gray-700 line-clamp-3">{getValue<string>() || 'No comment text'}</p>
-          </div>
-        ),
-      },
-      {
-        id: 'company',
-        header: 'Company',
-        cell: ({ row }) => {
-          const headline = row.original.headline || '';
-          let company = '';
-          
-          if (headline) {
-            const atIndex = headline.indexOf(' at ');
-            if (atIndex > -1) {
-              company = headline.substring(atIndex + 4).split(' · ')[0].trim();
-            }
-          }
-          
-          return (
-            <div className="text-sm">
-              {company ? (
-                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                  {company}
-                </span>
-              ) : (
-                <span className="text-gray-400">N/A</span>
-              )}
-            </div>
-          );
-        },
-      },
-      {
-        id: 'stats',
-        header: 'Stats',
-        cell: ({ row }) => (
-          <div className="text-right">
-            <div className="flex items-center justify-end space-x-4">
-              <div className="text-center">
-                <div className="text-lg font-semibold text-gray-900">
-                  {row.original.likesCount || 0}
-                </div>
-                <div className="text-xs text-gray-500">Likes</div>
-              </div>
-              <div className="text-sm text-gray-500">
-                {row.original.commentedAt ? (
-                  <div>
-                    <div>{format(new Date(row.original.commentedAt), 'MMM dd')}</div>
-                    <div className="text-xs">{format(new Date(row.original.commentedAt), 'hh:mm a')}</div>
-                  </div>
-                ) : 'N/A'}
-              </div>
-            </div>
-          </div>
-        ),
-      },
-    ],
-    []
-  );
-
-  const table = useReactTable({
-    data: paginatedData,
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    onSortingChange: setSorting,
-    state: {
-      sorting,
-    },
-  });
-
-  return (
-    <>
-      <div className="overflow-x-auto border border-gray-200 rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gradient-to-r from-gray-50 to-indigo-50">
-            {table.getHeaderGroups().map((headerGroup) => (
-              <tr key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <th
-                    key={header.id}
-                    className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider"
-                    onClick={header.column.getToggleSortingHandler()}
-                  >
-                    <div className="flex items-center cursor-pointer">
-                      {flexRender(
-                        header.column.columnDef.header,
-                        header.getContext()
-                      )}
-                      <span className="ml-1">
-                        {{
-                          asc: ' ▲',
-                          desc: ' ▼',
-                        }[header.column.getIsSorted() as string] ?? ''}
-                      </span>
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            ))}
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {table.getRowModel().rows.length > 0 ? (
-              table.getRowModel().rows.map((row) => (
-                <tr 
-                  key={row.id}
-                  className="hover:bg-indigo-50 transition-colors duration-150"
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <td
-                      key={cell.id}
-                      className="px-6 py-4"
-                    >
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext()
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))
-            ) : (
-              <tr>
-                <td
-                  colSpan={columns.length}
-                  className="px-6 py-8 text-center text-gray-500"
-                >
-                  <div className="flex flex-col items-center justify-center space-y-2">
-                    <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center">
-                      <MessageSquare className="h-6 w-6 text-gray-400" />
-                    </div>
-                    <div className="text-gray-600">No comments data available for this post</div>
-                    <div className="text-sm text-gray-400">Try analyzing a different LinkedIn URL</div>
-                  </div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Custom Pagination */}
-      {data.length > 10 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between mt-4 px-4 py-3 bg-gray-50 border border-gray-200 rounded-lg">
-          <div className="mb-3 sm:mb-0">
-            <p className="text-sm text-gray-700">
-              Showing <span className="font-semibold">{startItem}</span> to{' '}
-              <span className="font-semibold">{endItem}</span> of{' '}
-              <span className="font-semibold">{totalItems}</span> comments
-            </p>
-          </div>
-          
-          <div className="flex items-center space-x-2">
-            <div className="flex items-center space-x-1">
-              <button
-                onClick={() => goToPage(1)}
-                disabled={!hasPrevPage}
-                className="p-2 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="First page"
-              >
-                <ChevronsLeft className="h-4 w-4" />
-              </button>
-              <button
-                onClick={prevPage}
-                disabled={!hasPrevPage}
-                className="p-2 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Previous page"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </button>
-              
-              <div className="flex items-center space-x-1">
-                <input
-                  type="number"
-                  min="1"
-                  max={totalPages}
-                  value={currentPage}
-                  onChange={(e) => goToPage(parseInt(e.target.value) || 1)}
-                  className="w-12 px-2 py-1 text-center border border-gray-300 rounded-md text-sm"
-                />
-                <span className="text-sm text-gray-600">of {totalPages}</span>
-              </div>
-              
-              <button
-                onClick={nextPage}
-                disabled={!hasNextPage}
-                className="p-2 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Next page"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </button>
-              <button
-                onClick={() => goToPage(totalPages)}
-                disabled={!hasNextPage}
-                className="p-2 rounded-md hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                title="Last page"
-              >
-                <ChevronsRight className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
-// The rest of your ResultsTable component remains the same...
-// Keep all the export functions and the main ResultsTable function as they are
-// Only replace the LikesTable and CommentsTable components above
-
 export default function ResultsTable({ data }: ResultsTableProps) {
-  const [activeTab, setActiveTab] = useState<'likes' | 'comments' | 'post'>('likes');
-
-  const downloadCSV = (filename: string, headers: string[], rows: any[][]) => {
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => 
-        `"${String(cell || '').replace(/"/g, '""')}"`
-      ).join(','))
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+  // CSV with correct order: Name, Company, Job Title, Profile URL
+  const downloadCSV = () => {
+    const csvData = convertToCSV(data.likes);
+    const blob = new Blob([csvData], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `linkedin-likes-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
   };
 
-  const exportLikes = () => {
-    const headers = ['Name', 'Profile URL', 'Title', 'Company', 'Location', 'Liked At'];
-    const rows = data.likes.map(like => {
-      let title = like.headline || '';
-      let company = '';
-      
-      if (like.headline) {
-        const atIndex = like.headline.indexOf(' at ');
-        if (atIndex > -1) {
-          title = like.headline.substring(0, atIndex).trim();
-          company = like.headline.substring(atIndex + 4).split(' · ')[0].trim();
-        }
-      }
-      
-      return [
-        like.name || '',
-        like.profileUrl || '',
-        title,
-        company,
-        like.location || '',
-        like.likedAt || ''
-      ];
-    });
-    downloadCSV(`linkedin-likes-${Date.now()}.csv`, headers, rows);
-  };
-
-  const exportComments = () => {
-    const headers = ['Name', 'Profile URL', 'Title', 'Company', 'Comment', 'Likes', 'Commented At'];
-    const rows = data.comments.map(comment => {
-      let title = comment.headline || '';
-      let company = '';
-      
-      if (comment.headline) {
-        const atIndex = comment.headline.indexOf(' at ');
-        if (atIndex > -1) {
-          title = comment.headline.substring(0, atIndex).trim();
-          company = comment.headline.substring(atIndex + 4).split(' · ')[0].trim();
-        }
-      }
-      
-      return [
-        comment.name || '',
-        comment.profileUrl || '',
-        title,
-        company,
-        comment.comment || '',
-        comment.likesCount || 0,
-        comment.commentedAt || ''
-      ];
-    });
-    downloadCSV(`linkedin-comments-${Date.now()}.csv`, headers, rows);
-  };
-
-  const exportAll = () => {
-    const headers = ['Type', 'Name', 'Profile URL', 'Title', 'Company', 'Content/Location', 'Likes', 'Timestamp'];
-    const likeRows = data.likes.map(like => {
-      let title = like.headline || '';
-      let company = '';
-      
-      if (like.headline) {
-        const atIndex = like.headline.indexOf(' at ');
-        if (atIndex > -1) {
-          title = like.headline.substring(0, atIndex).trim();
-          company = like.headline.substring(atIndex + 4).split(' · ')[0].trim();
-        }
-      }
-      
-      return [
-        'Like',
-        like.name || '',
-        like.profileUrl || '',
-        title,
-        company,
-        like.location || '',
-        '',
-        like.likedAt || ''
-      ];
-    });
+  const convertToCSV = (data: any[]) => {
+    if (!data || data.length === 0) return '';
     
-    const commentRows = data.comments.map(comment => {
-      let title = comment.headline || '';
-      let company = '';
-      
-      if (comment.headline) {
-        const atIndex = comment.headline.indexOf(' at ');
-        if (atIndex > -1) {
-          title = comment.headline.substring(0, atIndex).trim();
-          company = comment.headline.substring(atIndex + 4).split(' · ')[0].trim();
-        }
-      }
-      
-      return [
-        'Comment',
-        comment.name || '',
-        comment.profileUrl || '',
-        title,
-        company,
-        comment.comment || '',
-        comment.likesCount || 0,
-        comment.commentedAt || ''
-      ];
-    });
+    const headers = ['Name', 'Company', 'Job Title', 'Profile URL'];
     
-    downloadCSV(`linkedin-engagement-${Date.now()}.csv`, headers, [...likeRows, ...commentRows]);
+    const csvRows = [];
+    csvRows.push(headers.join(','));
+    
+    for (const row of data) {
+      const values = [
+        `"${(row.name || '').replace(/"/g, '""')}"`,
+        `"${(row.company || 'Not specified').replace(/"/g, '""')}"`,
+        `"${(row.jobTitle || row.headline || 'Not specified').replace(/"/g, '""')}"`,
+        `"${(row.profileUrl || '').replace(/"/g, '""')}"`
+      ];
+      csvRows.push(values.join(','));
+    }
+    
+    return csvRows.join('\n');
   };
 
   return (
-    <div className="w-full bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden">
-      {/* Tabs */}
-      <div className="border-b border-gray-200">
-        <div className="px-6">
-          <nav className="-mb-px flex space-x-8">
-            <button
-              onClick={() => setActiveTab('post')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'post'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Post Information
-            </button>
-            <button
-              onClick={() => setActiveTab('likes')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'likes'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Likes ({data.likes.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('comments')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'comments'
-                  ? 'border-blue-500 text-blue-600'
-                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-              }`}
-            >
-              Comments ({data.comments.length})
-            </button>
-          </nav>
-        </div>
+    <div className="space-y-8">
+      {/* Download Button */}
+      <div className="flex justify-end mb-4">
+        <button
+          onClick={downloadCSV}
+          className="flex items-center space-x-2 px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:shadow-lg transition-all duration-300"
+        >
+          <Download className="h-4 w-4" />
+          <span>Download CSV ({data.likes.length} profiles)</span>
+        </button>
       </div>
 
-      {/* Tab Content */}
-      <div className="p-6">
-        {/* Post Info Tab */}
-        {activeTab === 'post' && data.post && (
-          <div className="space-y-6">
-            <div className="bg-gradient-to-r from-blue-50 to-gray-50 p-6 rounded-xl border border-blue-100">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-3 mb-4">
-                    <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                      <span className="text-blue-600 font-bold text-lg">
-                        {data.post.author?.split(' ').map(n => n[0]).join('').toUpperCase() || 'NA'}
+      {/* LIKES TABLE - CORRECT COLUMN ORDER: Name | Company | Job Title | Profile */}
+      <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <User className="h-6 w-6 text-white" />
+              <h3 className="text-xl font-bold text-white">People Who Liked ({data.likes.length})</h3>
+            </div>
+            <div className="text-blue-100">
+              Automatically extracted from posts
+            </div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Title</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Profile</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {data.likes.map((like: any, index: number) => (
+                <tr key={index} className="hover:bg-gray-50 transition-colors">
+                  {/* NAME COLUMN */}
+                  <td className="px-6 py-4">
+                    <div className="flex items-center">
+                      <div className="flex-shrink-0 h-10 w-10 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-full flex items-center justify-center mr-3">
+                        <User className="h-5 w-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <div className="text-sm font-medium text-gray-900">
+                          {like.name || 'Unknown'}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  
+                  {/* COMPANY COLUMN - Using company field */}
+                  <td className="px-6 py-4">
+                    <div className="flex items-center text-sm text-gray-900">
+                      <Building2 className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
+                      <span className="max-w-xs truncate font-medium">
+                        {like.company || 'Not specified'}
                       </span>
                     </div>
-                    <div>
-                      <h3 className="font-bold text-lg text-gray-900">{data.post.author || 'Unknown Author'}</h3>
-                      {data.post.authorProfileUrl && (
-                        <a
-                          href={data.post.authorProfileUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline text-sm"
-                        >
-                          View LinkedIn Profile
-                        </a>
-                      )}
-                    </div>
-                  </div>
+                  </td>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                    <div className="bg-white p-4 rounded-lg border border-gray-200">
-                      <div className="text-sm text-gray-500 mb-1">Posted</div>
-                      <div className="text-gray-900 font-medium">
-                        {data.post.postedAt ? format(new Date(data.post.postedAt), 'PPP') : 'N/A'}
-                      </div>
-                      {data.post.postedAt && (
-                        <div className="text-sm text-gray-500">
-                          {format(new Date(data.post.postedAt), 'hh:mm a')}
-                        </div>
-                      )}
+                  {/* JOB TITLE COLUMN - Using jobTitle field */}
+                  <td className="px-6 py-4">
+                    <div className="flex items-center text-sm text-gray-600">
+                      <Briefcase className="h-4 w-4 mr-2 text-gray-400 flex-shrink-0" />
+                      <span className="max-w-xs truncate">
+                        {like.jobTitle || like.headline || 'Not specified'}
+                      </span>
                     </div>
+                  </td>
+                  
+                  {/* PROFILE URL COLUMN */}
+                  <td className="px-6 py-4">
+                    {like.profileUrl ? (
+                      <a 
+                        href={like.profileUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-sm hover:bg-blue-100 transition-colors"
+                      >
+                        <ExternalLink className="h-3 w-3 mr-1" />
+                        View Profile
+                      </a>
+                    ) : (
+                      <span className="text-sm text-gray-400">No URL</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {data.likes.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-12 text-center text-gray-500">
+                    No likes data available
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      
+      {/* COMMENTS TABLE - CORRECT COLUMN ORDER: Name | Company | Job Title | Comment | Profile */}
+      {data.comments && data.comments.length > 0 && (
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden mt-8">
+          <div className="bg-gradient-to-r from-green-600 to-teal-600 p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <Briefcase className="h-6 w-6 text-white" />
+                <h3 className="text-xl font-bold text-white">Comments ({data.comments.length})</h3>
+              </div>
+              <div className="text-green-100">
+                Extracted from post
+              </div>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Job Title</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Comment</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Profile</th>
+                </tr>
+              </thead>
+              <tbody className="bg-white divide-y divide-gray-200">
+                {data.comments.map((comment: any, index: number) => (
+                  <tr key={index} className="hover:bg-gray-50 transition-colors">
+                    {/* NAME COLUMN */}
+                    <td className="px-6 py-4">
+                      <div className="flex items-center">
+                        <div className="flex-shrink-0 h-8 w-8 bg-gradient-to-r from-green-100 to-teal-100 rounded-full flex items-center justify-center mr-2">
+                          <User className="h-4 w-4 text-green-600" />
+                        </div>
+                        <span className="text-sm font-medium text-gray-900">
+                          {comment.name || 'Unknown'}
+                        </span>
+                      </div>
+                    </td>
                     
-                    <div className="bg-white p-4 rounded-lg border border-gray-200">
-                      <div className="text-sm text-gray-500 mb-1">Post URL</div>
-                      {data.post.postUrl ? (
-                        <a
-                          href={data.post.postUrl}
-                          target="_blank"
+                    {/* COMPANY COLUMN */}
+                    <td className="px-6 py-4">
+                      <span className="text-sm text-gray-600">
+                        {comment.company || 'Not specified'}
+                      </span>
+                    </td>
+                    
+                    {/* JOB TITLE COLUMN */}
+                    <td className="px-6 py-4">
+                      <span className="text-sm text-gray-600">
+                        {comment.jobTitle || comment.headline || 'Not specified'}
+                      </span>
+                    </td>
+                    
+                    {/* COMMENT TEXT COLUMN */}
+                    <td className="px-6 py-4">
+                      <p className="text-sm text-gray-600 max-w-xs truncate">
+                        {comment.commentText || ''}
+                      </p>
+                    </td>
+                    
+                    {/* PROFILE URL COLUMN */}
+                    <td className="px-6 py-4">
+                      {comment.profileUrl ? (
+                        <a 
+                          href={comment.profileUrl} 
+                          target="_blank" 
                           rel="noopener noreferrer"
-                          className="text-blue-600 hover:underline text-sm break-all block truncate"
+                          className="text-green-600 hover:text-green-800 text-sm flex items-center"
                         >
-                          {data.post.postUrl}
+                          <ExternalLink className="h-3 w-3 mr-1" />
+                          View
                         </a>
                       ) : (
-                        <span className="text-gray-500">N/A</span>
+                        <span className="text-sm text-gray-400">No URL</span>
                       )}
-                    </div>
-                  </div>
-                  
-                  <div className="bg-white p-4 rounded-lg border border-gray-200">
-                    <div className="text-sm text-gray-500 mb-2">Content Preview</div>
-                    <div className="text-gray-700 whitespace-pre-wrap max-h-48 overflow-y-auto">
-                      {data.post.content || 'No content available'}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="bg-gradient-to-r from-blue-50 to-blue-100 p-4 rounded-xl text-center">
-                <div className="text-2xl font-bold text-blue-600">{data.post.likesCount || 0}</div>
-                <div className="text-sm text-gray-600 mt-1">Likes</div>
-              </div>
-              <div className="bg-gradient-to-r from-indigo-50 to-indigo-100 p-4 rounded-xl text-center">
-                <div className="text-2xl font-bold text-indigo-600">{data.post.commentsCount || 0}</div>
-                <div className="text-sm text-gray-600 mt-1">Comments</div>
-              </div>
-              <div className="bg-gradient-to-r from-green-50 to-green-100 p-4 rounded-xl text-center">
-                <div className="text-2xl font-bold text-green-600">{data.likes.length}</div>
-                <div className="text-sm text-gray-600 mt-1">Scraped Likes</div>
-              </div>
-              <div className="bg-gradient-to-r from-purple-50 to-purple-100 p-4 rounded-xl text-center">
-                <div className="text-2xl font-bold text-purple-600">{data.comments.length}</div>
-                <div className="text-sm text-gray-600 mt-1">Scraped Comments</div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Likes Tab */}
-        {activeTab === 'likes' && <LikesTable data={data.likes} />}
-
-        {/* Comments Tab */}
-        {activeTab === 'comments' && <CommentsTable data={data.comments} />}
-      </div>
-
-      {/* Export Options */}
-      <div className="border-t border-gray-200 bg-gray-50 p-6">
-        <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
-          <div className="text-sm text-gray-600">
-            <div className="font-medium text-gray-900">Scraped using authenticated LinkedIn cookies</div>
-            <div>Scraped at: {format(new Date(data.scrapedAt), 'PPP pp')}</div>
-          </div>
-          
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={exportLikes}
-              disabled={data.likes.length === 0}
-              className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-blue-600 to-blue-700 text-white rounded-lg hover:shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Export Likes ({data.likes.length})
-            </button>
-            <button
-              onClick={exportComments}
-              disabled={data.comments.length === 0}
-              className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-lg hover:shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Export Comments ({data.comments.length})
-            </button>
-            <button
-              onClick={exportAll}
-              disabled={data.likes.length === 0 && data.comments.length === 0}
-              className="inline-flex items-center px-4 py-2 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg hover:shadow-lg transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Export All Data
-            </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      </div>
+      )}
+
+      {/* POSTS SECTION */}
+      {data.posts && data.posts.length > 0 && (
+        <div className="bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+          <div className="bg-gradient-to-r from-purple-600 to-pink-600 p-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="h-6 w-6 text-white">📄</div>
+                <h3 className="text-xl font-bold text-white">Posts Found ({data.posts.length})</h3>
+              </div>
+              <div className="text-purple-100">
+                Recent activity
+              </div>
+            </div>
+          </div>
+          <div className="p-6">
+            <div className="space-y-4">
+              {data.posts.map((post: any, index: number) => (
+                <div key={index} className="border border-gray-100 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 bg-gradient-to-r from-purple-100 to-pink-100 rounded-full flex items-center justify-center">
+                        <User className="h-5 w-5 text-purple-600" />
+                      </div>
+                      <div>
+                        <h4 className="font-medium text-gray-900">{post.author}</h4>
+                        <p className="text-sm text-gray-600">
+                          {post.postedAt ? new Date(post.postedAt).toLocaleDateString() : 'N/A'}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex space-x-4">
+                      <span className="inline-flex items-center px-2 py-1 bg-blue-50 text-blue-700 rounded-full text-xs">
+                        👍 {post.likesCount || 0}
+                      </span>
+                      <span className="inline-flex items-center px-2 py-1 bg-green-50 text-green-700 rounded-full text-xs">
+                        💬 {post.commentsCount || 0}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-gray-700 mb-3">{post.content}</p>
+                  {post.postUrl && (
+                    <a 
+                      href={post.postUrl} 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center text-sm text-purple-600 hover:text-purple-800"
+                    >
+                      <ExternalLink className="h-3 w-3 mr-1" />
+                      View Original Post
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
