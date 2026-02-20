@@ -56,7 +56,7 @@ export default function DashboardPage() {
   const checkCookieStatus = async () => {
     setIsCheckingCookies(true);
     try {
-      const response = await fetch('/api/cookie-status');
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/cookie-status`);
       const data = await response.json();
       
       if (response.ok) {
