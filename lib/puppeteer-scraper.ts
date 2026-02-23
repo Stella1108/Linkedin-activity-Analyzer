@@ -150,22 +150,29 @@ export class LinkedInScraper {
       throw new Error('Invalid li_at cookie format');
     }
 
+    // ✅ UPDATED: Render-compatible launch options
     const launchOptions: any = {
-      headless: false,
+      headless: true, // Must be true on Render (no GUI)
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--start-maximized',
-        '--disable-infobars',
+        '--disable-dev-shm-usage', // Important for shared memory in containers
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--window-size=1920,1080',
         '--disable-notifications',
-        '--window-size=1920,1080'
+        '--disable-infobars',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process' // Helps with memory on Render
       ],
-      defaultViewport: null,
-      timeout: 180000
+      defaultViewport: { width: 1920, height: 1080 },
+      timeout: 180000,
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
     };
 
     try {
-      console.log('🖥️  Launching browser...');
+      console.log('🖥️  Launching browser in headless mode...');
       this.browser = await puppeteer.launch(launchOptions);
       this.browserLaunched = true;
       this.page = await this.browser.newPage();
