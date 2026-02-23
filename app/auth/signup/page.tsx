@@ -75,9 +75,8 @@ export default function SignUpPage() {
       }
 
       if (data.user) {
-        // Success message
-        setSuccess('🎉 Account created successfully! Redirecting to login...');
-        
+        // Success message (for email confirmation case)
+        setSuccess('📧 Please check your email to confirm your account. Once confirmed, you can login.');
         // Clear form
         setFormData({
           name: '',
@@ -85,22 +84,15 @@ export default function SignUpPage() {
           password: '',
           confirmPassword: '',
         });
-        
-        // Wait a moment to show success message
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Redirect to login with success message
-        router.push('/auth/login?signupSuccess=true');
-        
-      } else if (data.session) {
-        // User confirmed email immediately
+        // No redirect – user needs to confirm email first
+      } 
+      
+      if (data.session) {
+        // User confirmed email immediately (auto‑confirm or after verification)
         setSuccess('✅ Account created successfully! Redirecting to dashboard...');
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // 🚀 Redirect immediately – no artificial delay
         router.push('/dashboard');
         router.refresh();
-      } else {
-        // Email confirmation required
-        setSuccess('📧 Please check your email to confirm your account. Once confirmed, you can login.');
       }
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred. Please try again.');
@@ -351,8 +343,6 @@ export default function SignUpPage() {
             </p>
           </div>
         </div>
-
-        {/* Features */}
       </div>
     </div>
   );

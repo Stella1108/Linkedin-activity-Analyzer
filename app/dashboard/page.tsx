@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import AnalyzeForm from '../components/AnalyzeForm';
 import ResultsTable from '../components/ResultsTable';
 import { 
@@ -18,7 +19,6 @@ import {
   Download, ExternalLink, History, Cookie, FileText 
 } from 'lucide-react';
 import { signOut, getCurrentUser } from '@/lib/supabase';
-import Link from 'next/link';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -228,10 +228,27 @@ export default function DashboardPage() {
     }
   };
 
+  // ✅ FIXED: Robust sign out function
   const handleSignOut = async () => {
-    await signOut();
-    router.push('/auth/login');
-    router.refresh();
+    try {
+      // Attempt to sign out from Supabase
+      const { error } = await signOut();
+      if (error) {
+        console.error('Sign out error:', error);
+        // Still proceed with redirect
+      }
+      
+      // Clear any client-side storage (optional)
+      localStorage.removeItem('supabase.auth.token');
+      sessionStorage.clear();
+      
+      // Hard redirect to login page
+      window.location.href = '/auth/login';
+    } catch (err) {
+      console.error('Unexpected sign out error:', err);
+      // Fallback redirect
+      window.location.href = '/auth/login';
+    }
   };
 
   // ==========================================================================

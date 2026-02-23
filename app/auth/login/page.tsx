@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { signIn } from '@/lib/supabase';
@@ -17,16 +17,13 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Check if there's a success message from signup redirect
-  useState(() => {
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const signupSuccess = params.get('signupSuccess');
-      if (signupSuccess === 'true') {
-        setSuccess('Account created successfully! Please login with your credentials.');
-      }
+  // Check for signup success message in URL (runs only once on mount)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('signupSuccess') === 'true') {
+      setSuccess('Account created successfully! Please login with your credentials.');
     }
-  });
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,13 +47,10 @@ export default function LoginPage() {
       }
 
       if (data.user) {
-        // Show success message before redirect
+        // Show success message briefly (it will disappear on redirect)
         setSuccess('Login successful! Redirecting to dashboard...');
-        
-        // Wait a moment to show success message
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        
-        // Redirect to dashboard
+
+        // 🚀 Redirect immediately – no artificial delay
         router.push('/dashboard');
         router.refresh();
       }
