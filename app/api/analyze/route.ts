@@ -4,6 +4,7 @@ import LinkedInScraper, { ScrapeResult, LinkedInProfileData } from '@/lib/puppet
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
+import os from 'os';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -39,27 +40,69 @@ function convertToCSV(data: any[]): string {
 }
 
 // ==========================================================================
-// 🔍 CHECK IF CHROME IS INSTALLED AND GET ITS PATH (ENHANCED)
+// 🔍 CHECK IF CHROME IS INSTALLED AND GET ITS PATH (VERCEL COMPATIBLE)
 // ==========================================================================
 async function ensureChromeInstalled(): Promise<string | null> {
   console.log('🔍 Checking Chrome installation...');
-  
-  // Log environment for debugging
+  console.log('💻 Platform:', process.platform);
   console.log('📂 Current working directory:', process.cwd());
-  console.log('📂 Node modules path:', path.join(process.cwd(), 'node_modules'));
+  console.log('🌎 Environment:', process.env.VERCEL ? 'Vercel' : 'Local');
+
+  // Use /tmp for caching on Vercel (writable directory)
+  const isVercel = !!process.env.VERCEL;
+  const baseCacheDir = isVercel ? '/tmp' : path.join(process.cwd(), 'node_modules', '.cache');
+  const puppeteerCacheDir = path.join(baseCacheDir, 'puppeteer');
   
-  // Possible Chrome paths (in order of preference)
-  const possiblePaths = [
-    process.env.PUPPETEER_EXECUTABLE_PATH,
-    '/usr/bin/google-chrome',
-    '/usr/bin/google-chrome-stable',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
-    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
-    path.join(process.cwd(), 'node_modules', '.cache', 'puppeteer', 'chrome', 'linux-*', 'chrome-linux64', 'chrome'),
-    path.join('/opt/render/project/src', 'node_modules', '.cache', 'puppeteer', 'chrome', 'linux-*', 'chrome-linux64', 'chrome')
-  ];
+  console.log(`📂 Using cache directory: ${puppeteerCacheDir}`);
+
+  // Ensure cache directory exists
+  try {
+    if (!fs.existsSync(baseCacheDir)) {
+      fs.mkdirSync(baseCacheDir, { recursive: true });
+    }
+    if (!fs.existsSync(puppeteerCacheDir)) {
+      fs.mkdirSync(puppeteerCacheDir, { recursive: true });
+    }
+    console.log('✅ Cache directory created/verified');
+  } catch (error) {
+    console.error('❌ Failed to create cache directory:', error);
+  }
+
+  // Set Puppeteer cache directory
+  process.env.PUPPETEER_CACHE_DIR = puppeteerCacheDir;
+
+  // Common Chrome paths for different platforms
+  const paths = {
+    win32: [
+      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+      path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+    ],
+    linux: [
+      '/usr/bin/google-chrome',
+      '/usr/bin/google-chrome-stable',
+      '/usr/bin/chromium-browser',
+      '/usr/bin/chromium',
+      path.join(puppeteerCacheDir, 'chrome', 'linux-*', 'chrome-linux64', 'chrome'),
+    ],
+    darwin: [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      path.join(process.env.HOME || '', 'Library/Caches/puppeteer/chrome'),
+    ]
+  };
+
+  // Get paths for current platform
+  const platform = process.platform as keyof typeof paths;
+  const possiblePaths = paths[platform] || [];
+
+  // Add Vercel-specific paths
+  if (isVercel) {
+    possiblePaths.push(
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium',
+      path.join(puppeteerCacheDir, 'chrome', 'linux-*', 'chrome-linux64', 'chrome')
+    );
+  }
 
   // Check each path
   for (const pattern of possiblePaths) {
@@ -73,21 +116,17 @@ async function ensureChromeInstalled(): Promise<string | null> {
       try {
         if (fs.existsSync(parentDir)) {
           const files = fs.readdirSync(parentDir);
-          const matchingDir = files.find(f => f.startsWith('linux-'));
+          const matchingDir = files.find(f => f.includes('linux') || f.includes('win64') || f.includes('mac'));
           if (matchingDir) {
             const fullPath = pattern.replace('*', matchingDir);
             if (fs.existsSync(fullPath)) {
               console.log(`✅ Chrome found at: ${fullPath}`);
-              // Make it executable
-              try {
-                fs.chmodSync(fullPath, 0o755);
-              } catch (e) {}
               return fullPath;
             }
           }
         }
       } catch (error) {
-        console.log(`⚠️ Error checking path ${pattern}:`, error);
+        // Ignore errors
       }
     } else {
       if (fs.existsSync(pattern)) {
@@ -98,47 +137,28 @@ async function ensureChromeInstalled(): Promise<string | null> {
   }
 
   console.log('❌ Chrome not found in any expected location');
-  
-  // Try to download Chrome on Render
-  if (process.env.RENDER || process.env.NODE_ENV === 'production') {
-    console.log('📥 Attempting to download Chrome...');
-    
-    // Create cache directory
-    const cacheDir = path.join(process.cwd(), 'node_modules', '.cache', 'puppeteer');
-    if (!fs.existsSync(cacheDir)) {
-      fs.mkdirSync(cacheDir, { recursive: true });
-    }
-    
-    // Set environment variable for cache directory
-    process.env.PUPPETEER_CACHE_DIR = cacheDir;
-    process.env.PUPPETEER_SKIP_CHROME_DOWNLOAD = 'false';
+
+  // Try to download Chrome on Vercel
+  if (isVercel) {
+    console.log('📥 Attempting to download Chrome on Vercel...');
     
     try {
-      // Try multiple download methods
-      const downloadCommands = [
-        'npx puppeteer browsers install chrome',
-        'node node_modules/puppeteer/install.mjs',
-        'npm run postinstall'
-      ];
+      // Download Chrome to /tmp
+      const downloadScript = `
+        export PUPPETEER_CACHE_DIR=${puppeteerCacheDir}
+        npx puppeteer browsers install chrome
+      `;
       
-      for (const cmd of downloadCommands) {
-        try {
-          console.log(`🔄 Trying: ${cmd}`);
-          execSync(cmd, { 
-            stdio: 'inherit',
-            env: { 
-              ...process.env, 
-              PUPPETEER_CACHE_DIR: cacheDir,
-              PUPPETEER_SKIP_CHROME_DOWNLOAD: 'false'
-            },
-            timeout: 120000 // 2 minute timeout
-          });
-          console.log(`✅ Command succeeded: ${cmd}`);
-          break;
-        } catch (e) {
-          console.log(`⚠️ Command failed: ${cmd}`);
-        }
-      }
+      execSync(downloadScript, { 
+        stdio: 'inherit',
+        shell: '/bin/bash',
+        env: { 
+          ...process.env, 
+          PUPPETEER_CACHE_DIR: puppeteerCacheDir,
+          PUPPETEER_SKIP_CHROME_DOWNLOAD: 'false'
+        },
+        timeout: 120000
+      });
       
       console.log('✅ Chrome download attempted');
       
@@ -146,7 +166,13 @@ async function ensureChromeInstalled(): Promise<string | null> {
       return await ensureChromeInstalled();
     } catch (downloadError) {
       console.error('❌ Failed to download Chrome:', downloadError);
-      return null;
+      
+      // On Vercel, try to use system Chrome as fallback
+      const systemChrome = '/usr/bin/google-chrome';
+      if (fs.existsSync(systemChrome)) {
+        console.log('✅ Using system Chrome as fallback');
+        return systemChrome;
+      }
     }
   }
   
@@ -197,7 +223,7 @@ async function getLinkedInCookie(): Promise<LinkedInProfileData | null> {
   }
 }
 
-// Increase timeout for Render
+// Increase timeout for Vercel
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
@@ -246,17 +272,16 @@ export async function POST(request: NextRequest) {
     const chromePath = await ensureChromeInstalled();
     
     if (!chromePath) {
-      // Provide helpful instructions
-      const errorMessage = `Chrome browser not found and could not be installed. 
+      const errorMessage = `Chrome browser not found. 
         Please ensure your package.json has "postinstall": "puppeteer browsers install chrome" 
-        and redeploy. If issue persists, check Render build logs.`;
+        and redeploy.`;
       
       console.error('❌', errorMessage);
       
       return NextResponse.json(
         { 
           success: false, 
-          error: 'Chrome browser not found and could not be installed. Please check your deployment configuration.',
+          error: 'Chrome browser not found. Please check your deployment configuration.',
           solution: 'Add "postinstall": "puppeteer browsers install chrome" to package.json scripts',
           docs: 'https://pptr.dev/guides/configuration'
         },
@@ -308,7 +333,9 @@ export async function POST(request: NextRequest) {
           error: `Browser initialization failed: ${initError.message}`,
           details: {
             chrome_path: chromePath,
-            cookie_valid: !!cookies
+            cookie_valid: !!cookies,
+            platform: process.platform,
+            is_vercel: !!process.env.VERCEL
           }
         },
         { status: 500 }
@@ -436,10 +463,11 @@ export async function GET() {
     chrome: {
       installed: !!chromePath,
       path: chromePath || 'Not found',
-      cache_dir: process.env.PUPPETEER_CACHE_DIR || '/home/sbx_user1051/.cache/puppeteer'
+      cache_dir: process.env.PUPPETEER_CACHE_DIR || 'Not set'
     },
     environment: {
-      render: !!process.env.RENDER,
+      vercel: !!process.env.VERCEL,
+      platform: process.platform,
       node_env: process.env.NODE_ENV
     }
   });
