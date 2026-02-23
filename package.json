@@ -7,8 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "npx puppeteer browsers install chrome",
-    "render-build": "npm install && puppeteer browsers install chrome && npm run build"
+    "postinstall": "node scripts/install-chrome.js",
+    "render-build": "npm install && npm run build"
   },
   "dependencies": {
     "@supabase/ssr": "^0.1.0",

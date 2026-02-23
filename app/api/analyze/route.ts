@@ -16,6 +16,14 @@ const supabase = createClient(
 let activeScraper: LinkedInScraper | null = null;
 
 // ==========================================================================
+// 🛡️ Helper function to safely get error message
+// ==========================================================================
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+// ==========================================================================
 // 🛡️ SAFE CSV CONVERSION
 // ==========================================================================
 function convertToCSV(data: any[]): string {
@@ -40,105 +48,80 @@ function convertToCSV(data: any[]): string {
 }
 
 // ==========================================================================
-// 🔍 CROSS-PLATFORM CHROME FINDER (Works on Windows, Mac, Linux, Render)
+// 📂 READ SAVED CHROME PATH FROM INSTALL SCRIPT (for Render)
 // ==========================================================================
-async function findChromePath(): Promise<string | null> {
-  console.log('\n🔍 Looking for Chrome...');
-  console.log(`🌎 Environment: ${process.env.RENDER ? 'Render' : 'Local'}`);
-  console.log(`💻 Platform: ${process.platform}`);
-  console.log(`📂 Current directory: ${process.cwd()}`);
-
-  const platform = process.platform;
-  const isRender = !!process.env.RENDER;
-
-  // Platform-specific paths
-  const paths: { [key: string]: string[] } = {
-    win32: [
-      // Standard installation paths
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      // User-specific paths
-      ...(process.env.LOCALAPPDATA ? [`${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`] : []),
-      ...(process.env.ProgramFiles ? [`${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe`] : []),
-      ...(process.env['ProgramFiles(x86)'] ? [`${process.env['ProgramFiles(x86)']}\\Google\\Chrome\\Application\\chrome.exe`] : []),
-      // Puppeteer cache
-      path.join(process.cwd(), 'node_modules', '.cache', 'puppeteer', 'chrome', 'win64-*', 'chrome-win64', 'chrome.exe'),
-    ],
-    darwin: [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      path.join(process.env.HOME || '', 'Library/Caches/puppeteer/chrome'),
-    ],
-    linux: [
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
-      '/snap/bin/chromium',
-    ]
-  };
-
-  // Add Render-specific paths
-  if (isRender) {
-    paths.linux.push(
-      '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
-      '/opt/render/.cache/puppeteer/chrome',
-      '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
-      '/app/.apt/usr/bin/google-chrome'
-    );
-  }
-
-  // Get paths for current platform
-  const possiblePaths = paths[platform] || paths.linux;
-
-  // First, check if Chrome is in PATH (for local development)
-  if (!isRender) {
-    try {
-      const whichCommand = platform === 'win32' ? 'where chrome' : 'which google-chrome';
-      const whichResult = execSync(whichCommand, { encoding: 'utf8' }).trim().split('\n')[0];
-      if (whichResult && fs.existsSync(whichResult)) {
-        console.log(`✅ Found Chrome in PATH: ${whichResult}`);
-        return whichResult;
+async function getSavedChromePath(): Promise<string | null> {
+  // Only for Render/Linux
+  if (!process.env.RENDER) return null;
+  
+  try {
+    // Check for saved path file
+    const pathFile = '/opt/render/.cache/puppeteer/chrome-path.txt';
+    if (fs.existsSync(pathFile)) {
+      const savedPath = fs.readFileSync(pathFile, 'utf8').trim();
+      console.log(`📂 Found saved Chrome path: ${savedPath}`);
+      
+      if (fs.existsSync(savedPath)) {
+        // Ensure permissions
+        fs.chmodSync(savedPath, 0o755);
+        return savedPath;
       }
-    } catch (error) {
-      console.log('ℹ️ Chrome not found in PATH, checking specific paths...');
     }
-  }
-
-  // Check each path pattern
-  for (const pattern of possiblePaths) {
-    if (!pattern) continue;
     
+    // Check for env file
+    const envFile = '/opt/render/.cache/puppeteer/chrome.env';
+    if (fs.existsSync(envFile)) {
+      const content = fs.readFileSync(envFile, 'utf8');
+      const match = content.match(/PUPPETEER_EXECUTABLE_PATH=(.+)/);
+      if (match) {
+        const envPath = match[1].trim();
+        if (fs.existsSync(envPath)) {
+          console.log(`📂 Found Chrome path from env file: ${envPath}`);
+          return envPath;
+        }
+      }
+    }
+  } catch (error) {
+    console.log(`⚠️ Could not read saved Chrome path: ${getErrorMessage(error)}`);
+  }
+  return null;
+}
+
+// ==========================================================================
+// 🔍 WINDOWS-SPECIFIC CHROME FINDER
+// ==========================================================================
+async function findChromeOnWindows(): Promise<string | null> {
+  console.log('\n🪟 Looking for Chrome on Windows...');
+  
+  const windowsPaths = [
+    // Most common locations first
+    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+    // User-specific paths
+    ...(process.env.LOCALAPPDATA ? [`${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe`] : []),
+    ...(process.env.ProgramFiles ? [`${process.env.ProgramFiles}\\Google\\Chrome\\Application\\chrome.exe`] : []),
+    ...(process.env['ProgramFiles(x86)'] ? [`${process.env['ProgramFiles(x86)']}\\Google\\Chrome\\Application\\chrome.exe`] : []),
+    // Puppeteer cache
+    path.join(process.cwd(), 'node_modules', '.cache', 'puppeteer', 'chrome', 'win64-*', 'chrome-win64', 'chrome.exe'),
+  ];
+
+  console.log('📂 Checking Windows paths:');
+  windowsPaths.forEach(p => console.log(`   ${p}`));
+
+  // Check each Windows path
+  for (const pattern of windowsPaths) {
     try {
-      // Handle wildcards (*) for version-specific directories
       if (pattern.includes('*')) {
         const basePath = pattern.split('*')[0];
         const parentDir = path.dirname(basePath);
         
         if (fs.existsSync(parentDir)) {
           const files = fs.readdirSync(parentDir);
-          // Find matching directory based on platform
-          let matchingDir: string | undefined;
-          
-          if (platform === 'win32') {
-            matchingDir = files.find(f => f.includes('win64'));
-          } else if (platform === 'darwin') {
-            matchingDir = files.find(f => f.includes('mac'));
-          } else {
-            matchingDir = files.find(f => f.includes('linux'));
-          }
-          
+          const matchingDir = files.find(f => f.includes('win64'));
           if (matchingDir) {
             const fullPath = pattern.replace('*', matchingDir);
             if (fs.existsSync(fullPath)) {
               console.log(`✅ Found Chrome at: ${fullPath}`);
-              
-              // Make executable on Unix-like systems
-              if (platform !== 'win32') {
-                try {
-                  fs.chmodSync(fullPath, 0o755);
-                } catch (e) {}
-              }
-              
               return fullPath;
             }
           }
@@ -151,11 +134,148 @@ async function findChromePath(): Promise<string | null> {
       }
     } catch (error) {
       // Ignore errors for individual paths
-      continue;
     }
   }
 
-  console.log('❌ Chrome not found in any location');
+  // Check PATH as fallback
+  try {
+    const whichResult = execSync('where chrome', { encoding: 'utf8' }).trim().split('\n')[0];
+    if (whichResult && fs.existsSync(whichResult)) {
+      console.log(`✅ Found Chrome in PATH: ${whichResult}`);
+      return whichResult;
+    }
+  } catch (error) {
+    console.log('ℹ️ Chrome not found in PATH');
+  }
+
+  console.log('❌ Chrome not found on Windows');
+  return null;
+}
+
+// ==========================================================================
+// 🔍 LINUX/RENDER-SPECIFIC CHROME FINDER
+// ==========================================================================
+async function findChromeOnLinux(): Promise<string | null> {
+  console.log('\n🐧 Looking for Chrome on Linux/Render...');
+  
+  const linuxPaths = [
+    // First check the saved path from install script
+    ...(await getSavedChromePath() ? [await getSavedChromePath()] : []),
+    // Puppeteer cache with wildcard
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
+    '/opt/render/.cache/puppeteer/chrome',
+    // System locations
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/app/.apt/usr/bin/google-chrome',
+  ].filter(Boolean) as string[];
+
+  console.log('📂 Checking Linux paths:');
+  linuxPaths.forEach(p => console.log(`   ${p}`));
+
+  // First check the chrome cache directory thoroughly
+  const chromeCacheDir = '/opt/render/.cache/puppeteer/chrome';
+  if (fs.existsSync(chromeCacheDir)) {
+    try {
+      const versions = fs.readdirSync(chromeCacheDir);
+      for (const version of versions) {
+        const chromePath = path.join(chromeCacheDir, version, 'chrome-linux64', 'chrome');
+        if (fs.existsSync(chromePath)) {
+          console.log(`✅ Found Chrome at: ${chromePath}`);
+          
+          // Set executable permissions
+          try {
+            fs.chmodSync(chromePath, 0o755);
+          } catch (e) {
+            // Ignore permission errors
+          }
+          
+          return chromePath;
+        }
+      }
+    } catch (error) {
+      console.error(`❌ Error scanning chrome directory: ${getErrorMessage(error)}`);
+    }
+  }
+
+  // Check each path pattern
+  for (const pattern of linuxPaths) {
+    if (!pattern) continue;
+    
+    try {
+      if (pattern.includes('*')) {
+        const basePath = pattern.split('*')[0];
+        const parentDir = path.dirname(basePath);
+        
+        if (fs.existsSync(parentDir)) {
+          const files = fs.readdirSync(parentDir);
+          const matchingDir = files.find(f => f.startsWith('linux-'));
+          if (matchingDir) {
+            const fullPath = path.join(parentDir, matchingDir, 'chrome-linux64', 'chrome');
+            if (fs.existsSync(fullPath)) {
+              console.log(`✅ Found Chrome at: ${fullPath}`);
+              return fullPath;
+            }
+          }
+        }
+      } else {
+        if (fs.existsSync(pattern)) {
+          console.log(`✅ Found Chrome at: ${pattern}`);
+          return pattern;
+        }
+      }
+    } catch (error) {
+      // Ignore errors
+    }
+  }
+
+  console.log('❌ Chrome not found on Linux');
+  return null;
+}
+
+// ==========================================================================
+// 🔍 CROSS-PLATFORM CHROME FINDER
+// ==========================================================================
+async function findChromePath(): Promise<string | null> {
+  console.log('\n' + '='.repeat(60));
+  console.log('🔍 CHROME PATH FINDER');
+  console.log('='.repeat(60));
+  console.log(`🌎 Environment: ${process.env.RENDER ? 'Render' : 'Local'}`);
+  console.log(`💻 Platform: ${process.platform}`);
+  console.log(`📂 Current directory: ${process.cwd()}`);
+
+  const platform = process.platform;
+  const isRender = !!process.env.RENDER;
+
+  // Windows local development
+  if (platform === 'win32' && !isRender) {
+    return await findChromeOnWindows();
+  }
+  
+  // Linux/Render
+  if (platform === 'linux' || isRender) {
+    return await findChromeOnLinux();
+  }
+  
+  // Mac (Darwin)
+  if (platform === 'darwin') {
+    console.log('🍎 Looking for Chrome on Mac...');
+    const macPaths = [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      path.join(process.env.HOME || '', 'Library/Caches/puppeteer/chrome'),
+    ];
+    
+    for (const macPath of macPaths) {
+      if (fs.existsSync(macPath)) {
+        console.log(`✅ Found Chrome at: ${macPath}`);
+        return macPath;
+      }
+    }
+  }
+
+  console.log('❌ Chrome not found on any platform');
   return null;
 }
 
@@ -211,7 +331,7 @@ async function downloadChrome(): Promise<boolean> {
     console.log('✅ Chrome download completed');
     return true;
   } catch (error: any) {
-    console.error('❌ Failed to download Chrome:', error.message);
+    console.error(`❌ Failed to download Chrome: ${getErrorMessage(error)}`);
     return false;
   }
 }
@@ -241,6 +361,7 @@ async function ensureChromeAvailable(): Promise<string | null> {
         console.log('⚠️ Chrome found but not executable, attempting to fix...');
         try {
           fs.chmodSync(chromePath, 0o755);
+          console.log('✅ Fixed permissions');
         } catch (e) {
           console.log('⚠️ Could not modify permissions');
         }
@@ -308,7 +429,7 @@ async function getLinkedInCookie(): Promise<LinkedInProfileData | null> {
       .maybeSingle();
 
     if (error) {
-      console.error('❌ Database error:', error.message);
+      console.error(`❌ Database error: ${error.message}`);
       return null;
     }
 
@@ -333,8 +454,8 @@ async function getLinkedInCookie(): Promise<LinkedInProfileData | null> {
 
     console.log(`✅ Using cookies for: ${data.name || 'LinkedIn User'}`);
     return data as LinkedInProfileData;
-  } catch (error: any) {
-    console.error('❌ Error in getLinkedInCookie:', error.message);
+  } catch (error) {
+    console.error(`❌ Error in getLinkedInCookie: ${getErrorMessage(error)}`);
     return null;
   }
 }
@@ -360,7 +481,7 @@ export async function POST(request: NextRequest) {
     try {
       body = await request.json();
     } catch (parseError) {
-      console.error('❌ Failed to parse request body:', parseError);
+      console.error(`❌ Failed to parse request body: ${getErrorMessage(parseError)}`);
       return NextResponse.json(
         { success: false, error: 'Invalid JSON in request body' },
         { status: 400 }
@@ -432,8 +553,8 @@ export async function POST(request: NextRequest) {
       console.log(`✅ Browser initialized in ${Math.round((Date.now() - startInit)/1000)}s`);
       console.log('⏳ Waiting 2 seconds for page stabilization...');
       await new Promise(resolve => setTimeout(resolve, 2000));
-    } catch (initError: any) {
-      console.error('❌ Failed to initialize:', initError.message);
+    } catch (initError) {
+      console.error(`❌ Failed to initialize: ${getErrorMessage(initError)}`);
       
       if (scraper) {
         await scraper.close();
@@ -443,7 +564,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { 
           success: false, 
-          error: `Browser initialization failed: ${initError.message}`,
+          error: `Browser initialization failed: ${getErrorMessage(initError)}`,
           details: {
             platform: process.platform,
             chrome_path: chromePath || 'auto-detected'
@@ -463,11 +584,11 @@ export async function POST(request: NextRequest) {
 
     try {
       result = await scraper.scrapeProfileActivity(url, maxLikes);
-    } catch (scrapeError: any) {
-      console.error('❌ Scraping error:', scrapeError.message);
+    } catch (scrapeError) {
+      console.error(`❌ Scraping error: ${getErrorMessage(scrapeError)}`);
       result = {
         success: false,
-        error: scrapeError.message,
+        error: getErrorMessage(scrapeError),
         data: {
           likes: [],
           comments: [],
@@ -557,14 +678,14 @@ export async function POST(request: NextRequest) {
       }
     });
 
-  } catch (error: any) {
-    console.error('\n❌ API ERROR:', error.message);
+  } catch (error) {
+    console.error(`\n❌ API ERROR: ${getErrorMessage(error)}`);
     
     if (scraper) {
       try {
         await scraper.close();
       } catch (closeError) {
-        console.error('Error closing scraper:', closeError);
+        console.error(`Error closing scraper: ${getErrorMessage(closeError)}`);
       }
       activeScraper = null;
     }
@@ -572,7 +693,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { 
         success: false, 
-        error: error.message || 'Internal server error'
+        error: getErrorMessage(error) || 'Internal server error'
       },
       { status: 500 }
     );
@@ -589,10 +710,10 @@ export async function GET() {
   return NextResponse.json({
     success: true,
     message: 'LinkedIn Scraper API - Cross Platform',
-    version: '3.0.0',
+    version: '3.1.0',
     chrome: {
       installed: !!chromePath,
-      path: chromePath || 'Not found (Puppeteer will auto-detect)',
+      path: chromePath || 'Not found',
       platform: process.platform
     },
     environment: {
@@ -601,9 +722,16 @@ export async function GET() {
       node_version: process.version,
       node_env: process.env.NODE_ENV
     },
-    instructions: {
-      local: 'For local development, ensure Chrome is installed or run: npx puppeteer browsers install chrome',
-      render: 'On Render, Chrome is installed during build via postinstall script'
+    paths_checked: {
+      windows: process.platform === 'win32' ? [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        '%LOCALAPPDATA%\\Google\\Chrome\\Application\\chrome.exe'
+      ] : undefined,
+      linux: process.platform === 'linux' ? [
+        '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
+        '/usr/bin/google-chrome'
+      ] : undefined
     }
   });
 }
