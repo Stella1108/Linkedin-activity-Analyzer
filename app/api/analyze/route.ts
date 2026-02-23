@@ -4,7 +4,6 @@ import LinkedInScraper, { ScrapeResult, LinkedInProfileData } from '@/lib/puppet
 import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
-import os from 'os';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -40,75 +39,76 @@ function convertToCSV(data: any[]): string {
 }
 
 // ==========================================================================
-// 🔍 CHECK IF CHROME IS INSTALLED AND GET ITS PATH (VERCEL COMPATIBLE)
+// 🔍 RENDER-SPECIFIC CHROME FINDER
 // ==========================================================================
-async function ensureChromeInstalled(): Promise<string | null> {
-  console.log('🔍 Checking Chrome installation...');
-  console.log('💻 Platform:', process.platform);
-  console.log('📂 Current working directory:', process.cwd());
-  console.log('🌎 Environment:', process.env.VERCEL ? 'Vercel' : 'Local');
-
-  // Use /tmp for caching on Vercel (writable directory)
-  const isVercel = !!process.env.VERCEL;
-  const baseCacheDir = isVercel ? '/tmp' : path.join(process.cwd(), 'node_modules', '.cache');
-  const puppeteerCacheDir = path.join(baseCacheDir, 'puppeteer');
+async function findChromeOnRender(): Promise<string | null> {
+  console.log('\n🔍 Looking for Chrome on Render...');
   
-  console.log(`📂 Using cache directory: ${puppeteerCacheDir}`);
+  const isRender = !!process.env.RENDER;
+  console.log(`🌎 Environment: ${isRender ? 'Render' : 'Local'}`);
+  console.log(`💻 Platform: ${process.platform}`);
 
-  // Ensure cache directory exists
-  try {
-    if (!fs.existsSync(baseCacheDir)) {
-      fs.mkdirSync(baseCacheDir, { recursive: true });
-    }
-    if (!fs.existsSync(puppeteerCacheDir)) {
-      fs.mkdirSync(puppeteerCacheDir, { recursive: true });
-    }
-    console.log('✅ Cache directory created/verified');
-  } catch (error) {
-    console.error('❌ Failed to create cache directory:', error);
-  }
-
-  // Set Puppeteer cache directory
-  process.env.PUPPETEER_CACHE_DIR = puppeteerCacheDir;
-
-  // Common Chrome paths for different platforms
-  const paths = {
-    win32: [
-      'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-      'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-      path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
-    ],
-    linux: [
-      '/usr/bin/google-chrome',
-      '/usr/bin/google-chrome-stable',
-      '/usr/bin/chromium-browser',
-      '/usr/bin/chromium',
-      path.join(puppeteerCacheDir, 'chrome', 'linux-*', 'chrome-linux64', 'chrome'),
-    ],
-    darwin: [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      path.join(process.env.HOME || '', 'Library/Caches/puppeteer/chrome'),
-    ]
-  };
-
-  // Get paths for current platform
-  const platform = process.platform as keyof typeof paths;
-  const possiblePaths = paths[platform] || [];
-
-  // Add Vercel-specific paths
-  if (isVercel) {
-    possiblePaths.push(
-      '/usr/bin/google-chrome',
-      '/usr/bin/chromium',
-      path.join(puppeteerCacheDir, 'chrome', 'linux-*', 'chrome-linux64', 'chrome')
-    );
-  }
-
-  // Check each path
-  for (const pattern of possiblePaths) {
-    if (!pattern) continue;
+  // Priority paths for Render
+  const pathsToCheck = [
+    // Render cache directory (where our install script puts Chrome)
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
+    '/opt/render/.cache/puppeteer/chrome',
     
-    // Handle wildcards
+    // System Chrome locations
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    
+    // Fallback paths
+    '/app/.apt/usr/bin/google-chrome',
+    '/usr/bin/chromium-browser',
+  ];
+
+  // First, check the Render cache directory thoroughly
+  const chromeCacheDir = '/opt/render/.cache/puppeteer/chrome';
+  if (fs.existsSync(chromeCacheDir)) {
+    console.log(`📂 Found chrome cache directory: ${chromeCacheDir}`);
+    
+    try {
+      const versions = fs.readdirSync(chromeCacheDir);
+      console.log(`📂 Found Chrome versions: ${versions.join(', ')}`);
+      
+      for (const version of versions) {
+        const chromePath = path.join(chromeCacheDir, version, 'chrome-linux64', 'chrome');
+        console.log(`🔍 Checking: ${chromePath}`);
+        
+        if (fs.existsSync(chromePath)) {
+          console.log(`✅ Found Chrome at: ${chromePath}`);
+          
+          // Make sure it's executable
+          try {
+            fs.chmodSync(chromePath, 0o755);
+            console.log('✅ Chrome is executable');
+          } catch (e) {
+            console.log('⚠️ Could not modify permissions, but continuing');
+          }
+          
+          // Verify it works
+          try {
+            const version = execSync(`"${chromePath}" --version`, { encoding: 'utf8' });
+            console.log(`✅ Chrome version: ${version.trim()}`);
+          } catch (e) {
+            console.log('⚠️ Could not verify Chrome version');
+          }
+          
+          return chromePath;
+        }
+      }
+    } catch (error) {
+      console.error('❌ Error scanning chrome directory:', error);
+    }
+  } else {
+    console.log('❌ Chrome cache directory not found');
+  }
+
+  // Check each path pattern
+  for (const pattern of pathsToCheck) {
     if (pattern.includes('*')) {
       const basePath = pattern.split('*')[0];
       const parentDir = path.dirname(basePath);
@@ -116,73 +116,100 @@ async function ensureChromeInstalled(): Promise<string | null> {
       try {
         if (fs.existsSync(parentDir)) {
           const files = fs.readdirSync(parentDir);
-          const matchingDir = files.find(f => f.includes('linux') || f.includes('win64') || f.includes('mac'));
+          const matchingDir = files.find(f => f.startsWith('linux-'));
+          
           if (matchingDir) {
-            const fullPath = pattern.replace('*', matchingDir);
+            const fullPath = path.join(parentDir, matchingDir, 'chrome-linux64', 'chrome');
             if (fs.existsSync(fullPath)) {
-              console.log(`✅ Chrome found at: ${fullPath}`);
+              console.log(`✅ Found Chrome at: ${fullPath}`);
               return fullPath;
             }
           }
         }
       } catch (error) {
-        // Ignore errors
+        // Ignore errors for individual paths
       }
     } else {
       if (fs.existsSync(pattern)) {
-        console.log(`✅ Chrome found at: ${pattern}`);
+        console.log(`✅ Found Chrome at: ${pattern}`);
         return pattern;
       }
     }
   }
 
-  console.log('❌ Chrome not found in any expected location');
-
-  // Try to download Chrome on Vercel
-  if (isVercel) {
-    console.log('📥 Attempting to download Chrome on Vercel...');
-    
-    try {
-      // Download Chrome to /tmp
-      const downloadScript = `
-        export PUPPETEER_CACHE_DIR=${puppeteerCacheDir}
-        npx puppeteer browsers install chrome
-      `;
-      
-      execSync(downloadScript, { 
-        stdio: 'inherit',
-        shell: '/bin/bash',
-        env: { 
-          ...process.env, 
-          PUPPETEER_CACHE_DIR: puppeteerCacheDir,
-          PUPPETEER_SKIP_CHROME_DOWNLOAD: 'false'
-        },
-        timeout: 120000
-      });
-      
-      console.log('✅ Chrome download attempted');
-      
-      // Check again after download
-      return await ensureChromeInstalled();
-    } catch (downloadError) {
-      console.error('❌ Failed to download Chrome:', downloadError);
-      
-      // On Vercel, try to use system Chrome as fallback
-      const systemChrome = '/usr/bin/google-chrome';
-      if (fs.existsSync(systemChrome)) {
-        console.log('✅ Using system Chrome as fallback');
-        return systemChrome;
-      }
-    }
-  }
-  
+  console.log('❌ Chrome not found in any location');
   return null;
 }
 
-// Function to get LinkedIn cookie from database
+// ==========================================================================
+// 🔧 ENSURE CHROME IS INSTALLED (RENDER-OPTIMIZED)
+// ==========================================================================
+async function ensureChromeInstalled(): Promise<string | null> {
+  console.log('\n' + '='.repeat(60));
+  console.log('🔧 CHROME INSTALLATION CHECK');
+  console.log('='.repeat(60));
+
+  // First try to find existing Chrome
+  let chromePath = await findChromeOnRender();
+  
+  if (chromePath) {
+    console.log(`\n✅ Using Chrome at: ${chromePath}`);
+    return chromePath;
+  }
+
+  // If on Render and Chrome not found, try to install it now
+  if (process.env.RENDER) {
+    console.log('\n⚠️ Chrome not found, attempting to install now...');
+    
+    const cacheDir = '/opt/render/.cache/puppeteer';
+    
+    try {
+      // Create cache directory
+      if (!fs.existsSync(cacheDir)) {
+        fs.mkdirSync(cacheDir, { recursive: true, mode: 0o755 });
+        console.log(`✅ Created cache directory: ${cacheDir}`);
+      }
+
+      // Set environment variables
+      process.env.PUPPETEER_CACHE_DIR = cacheDir;
+      process.env.PUPPETEER_SKIP_CHROME_DOWNLOAD = 'false';
+
+      // Download Chrome
+      console.log('\n📥 Downloading Chrome...');
+      execSync('npx puppeteer browsers install chrome', {
+        stdio: 'inherit',
+        env: {
+          ...process.env,
+          PUPPETEER_CACHE_DIR: cacheDir,
+          PUPPETEER_SKIP_CHROME_DOWNLOAD: 'false'
+        },
+        timeout: 300000 // 5 minutes
+      });
+
+      console.log('\n✅ Chrome download completed');
+      
+      // Search again after download
+      chromePath = await findChromeOnRender();
+      
+      if (chromePath) {
+        return chromePath;
+      }
+    } catch (error: any) {
+      console.error('❌ Failed to install Chrome:', error.message);
+    }
+  }
+
+  // Final attempt: Let Puppeteer try to find it automatically
+  console.log('\n⚠️ Using Puppeteer default Chrome discovery');
+  return null;
+}
+
+// ==========================================================================
+// 📊 GET LINKEDIN COOKIE FROM DATABASE
+// ==========================================================================
 async function getLinkedInCookie(): Promise<LinkedInProfileData | null> {
   try {
-    console.log('🔍 Fetching LinkedIn cookie from database...');
+    console.log('\n🔍 Fetching LinkedIn cookie from database...');
 
     const { data, error } = await supabase
       .from('linkedin_profile_data')
@@ -216,6 +243,7 @@ async function getLinkedInCookie(): Promise<LinkedInProfileData | null> {
       })
       .eq('id', data.id);
 
+    console.log(`✅ Using cookies for: ${data.name || 'LinkedIn User'}`);
     return data as LinkedInProfileData;
   } catch (error: any) {
     console.error('❌ Error in getLinkedInCookie:', error.message);
@@ -223,16 +251,20 @@ async function getLinkedInCookie(): Promise<LinkedInProfileData | null> {
   }
 }
 
-// Increase timeout for Vercel
+// Increase timeout for Render
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
+// ==========================================================================
+// 📥 MAIN POST HANDLER
+// ==========================================================================
 export async function POST(request: NextRequest) {
   let scraper: LinkedInScraper | null = null;
 
   console.log('\n' + '='.repeat(80));
   console.log('📥 RECEIVED SCRAPING REQUEST');
   console.log('='.repeat(80));
+  console.log(`🕐 Time: ${new Date().toISOString()}`);
 
   try {
     // Parse request body
@@ -259,31 +291,35 @@ export async function POST(request: NextRequest) {
 
     if (!url.includes('linkedin.com')) {
       return NextResponse.json(
-        { success: false, error: 'Valid LinkedIn URL required' },
+        { success: false, error: 'Valid LinkedIn URL required (must contain linkedin.com)' },
         { status: 400 }
       );
     }
 
     console.log(`🔗 URL: ${url}`);
     console.log(`🎯 Max Profiles: ${maxLikes}`);
+    console.log(`📊 Format: ${format}`);
 
     // ✅ STEP 1: Ensure Chrome is installed
-    console.log('\n🔍 Step 1: Checking Chrome installation...');
+    console.log('\n' + '-'.repeat(40));
+    console.log('STEP 1: Chrome Installation Check');
+    console.log('-'.repeat(40));
+    
     const chromePath = await ensureChromeInstalled();
     
     if (!chromePath) {
-      const errorMessage = `Chrome browser not found. 
-        Please ensure your package.json has "postinstall": "puppeteer browsers install chrome" 
-        and redeploy.`;
-      
+      const errorMessage = `Chrome browser not found. Please check your deployment configuration.`;
       console.error('❌', errorMessage);
       
       return NextResponse.json(
         { 
           success: false, 
           error: 'Chrome browser not found. Please check your deployment configuration.',
-          solution: 'Add "postinstall": "puppeteer browsers install chrome" to package.json scripts',
-          docs: 'https://pptr.dev/guides/configuration'
+          solution: 'Make sure your package.json has "postinstall": "puppeteer browsers install chrome"',
+          environment: {
+            render: !!process.env.RENDER,
+            platform: process.platform
+          }
         },
         { status: 503 }
       );
@@ -294,7 +330,10 @@ export async function POST(request: NextRequest) {
     console.log(`✅ Chrome path set to: ${chromePath}`);
 
     // ✅ STEP 2: Get cookies
-    console.log('\n🔍 Step 2: Getting LinkedIn cookies...');
+    console.log('\n' + '-'.repeat(40));
+    console.log('STEP 2: Cookie Retrieval');
+    console.log('-'.repeat(40));
+    
     const cookies = await getLinkedInCookie();
     if (!cookies) {
       return NextResponse.json(
@@ -306,18 +345,21 @@ export async function POST(request: NextRequest) {
         { status: 503 }
       );
     }
-    console.log(`✅ Using cookies for: ${cookies.name || 'LinkedIn User'}`);
 
     // ✅ STEP 3: Initialize scraper
-    console.log('\n🚀 Step 3: Initializing scraper...');
+    console.log('\n' + '-'.repeat(40));
+    console.log('STEP 3: Scraper Initialization');
+    console.log('-'.repeat(40));
+    
     scraper = new LinkedInScraper();
     activeScraper = scraper;
 
     try {
-      console.log('\n🖥️ Launching browser...');
+      console.log('🖥️ Launching browser...');
       const startInit = Date.now();
       await scraper.initialize(cookies, url);
       console.log(`✅ Browser initialized in ${Math.round((Date.now() - startInit)/1000)}s`);
+      console.log('⏳ Waiting 2 seconds for page stabilization...');
       await new Promise(resolve => setTimeout(resolve, 2000));
     } catch (initError: any) {
       console.error('❌ Failed to initialize:', initError.message);
@@ -335,7 +377,7 @@ export async function POST(request: NextRequest) {
             chrome_path: chromePath,
             cookie_valid: !!cookies,
             platform: process.platform,
-            is_vercel: !!process.env.VERCEL
+            is_render: !!process.env.RENDER
           }
         },
         { status: 500 }
@@ -343,7 +385,10 @@ export async function POST(request: NextRequest) {
     }
 
     // ✅ STEP 4: Perform scraping
-    console.log('\n🎯 Step 4: Starting scraping...');
+    console.log('\n' + '-'.repeat(40));
+    console.log('STEP 4: Scraping Profile Activity');
+    console.log('-'.repeat(40));
+    
     let result: ScrapeResult;
     const startTime = Date.now();
 
@@ -365,7 +410,7 @@ export async function POST(request: NextRequest) {
     }
 
     const totalTime = Math.round((Date.now() - startTime) / 1000);
-    console.log(`\n⏱️ Scraping time: ${totalTime} seconds`);
+    console.log(`\n⏱️ Scraping completed in ${totalTime} seconds`);
 
     // Close browser if not keeping open
     if (!keepOpen || !result.success) {
@@ -387,7 +432,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Format data
+    // Check if we have any data
+    if (!result.data || !result.data.likes || result.data.likes.length === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'No profiles found to scrape. This could mean: 1) The post has no likes, 2) The like modal couldn\'t be opened, or 3) LinkedIn blocked the request',
+          duration: `${totalTime} seconds`
+        },
+        { status: 404 }
+      );
+    }
+
+    // ✅ STEP 5: Format data
+    console.log('\n' + '-'.repeat(40));
+    console.log('STEP 5: Formatting Results');
+    console.log('-'.repeat(40));
+    
     const formattedData = {
       likes: result.data.likes.map(l => ({
         name: l.name && l.name !== 'Not specified' ? l.name : 'LinkedIn Member',
@@ -398,17 +459,18 @@ export async function POST(request: NextRequest) {
       posts: result.data.posts || []
     };
 
-    // Remove duplicates
+    // Remove duplicates based on profile URL
     const uniqueLikes = Array.from(
       new Map(formattedData.likes.map(item => [item.profileUrl, item])).values()
     );
     formattedData.likes = uniqueLikes;
 
-    console.log(`\n📊 Final data: ${formattedData.likes.length} unique profiles`);
+    console.log(`📊 Final data: ${formattedData.likes.length} unique profiles`);
 
     // Return CSV if requested
     if (format === 'csv') {
       const csvData = convertToCSV(formattedData.likes);
+      
       return new NextResponse(csvData, {
         headers: {
           'Content-Type': 'text/csv',
@@ -419,6 +481,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Return JSON
+    console.log('\n✅ Request completed successfully');
     return NextResponse.json({
       success: true,
       data: formattedData,
@@ -428,12 +491,15 @@ export async function POST(request: NextRequest) {
       statistics: {
         total_profiles: formattedData.likes.length,
         total_posts: formattedData.posts.length
-      }
+      },
+      sample: formattedData.likes.slice(0, 3)
     });
 
   } catch (error: any) {
     console.error('\n❌ API ERROR:', error.message);
+    console.error('Stack trace:', error.stack);
     
+    // Clean up
     if (scraper) {
       try {
         await scraper.close();
@@ -446,36 +512,68 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { 
         success: false, 
-        error: error.message || 'Internal server error'
+        error: error.message || 'Internal server error',
+        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
       },
       { status: 500 }
     );
   }
 }
 
+// ==========================================================================
+// 📊 GET ENDPOINT FOR STATUS CHECKS
+// ==========================================================================
 export async function GET() {
-  const chromePath = await ensureChromeInstalled();
+  console.log('\n📊 Status check requested');
+  
+  const chromePath = await findChromeOnRender();
+  const isRender = !!process.env.RENDER;
   
   return NextResponse.json({
     success: true,
-    message: 'LinkedIn Scraper API',
-    version: '1.0.0',
-    chrome: {
-      installed: !!chromePath,
-      path: chromePath || 'Not found',
-      cache_dir: process.env.PUPPETEER_CACHE_DIR || 'Not set'
+    message: 'LinkedIn Scraper API - Render Optimized',
+    version: '2.0.0',
+    status: {
+      chrome: {
+        installed: !!chromePath,
+        path: chromePath || 'Not found',
+        cache_dir: process.env.PUPPETEER_CACHE_DIR || '/opt/render/.cache/puppeteer'
+      },
+      scraper: {
+        active: activeScraper ? 'Running' : 'Not running',
+        initialized: activeScraper?.getBrowserStatus().isInitialized || false
+      },
+      environment: {
+        render: isRender,
+        platform: process.platform,
+        node_version: process.version,
+        node_env: process.env.NODE_ENV
+      }
     },
-    environment: {
-      vercel: !!process.env.VERCEL,
-      platform: process.platform,
-      node_env: process.env.NODE_ENV
+    features: [
+      '✅ Render-optimized Chrome installation',
+      '✅ Automatic Chrome path detection',
+      '✅ Detailed logging for debugging',
+      '✅ CSV export with 4 columns',
+      '✅ Deduplicated results'
+    ],
+    endpoints: {
+      POST: '/api/analyze - Start scraping (requires JSON body with url, maxLikes, format)',
+      GET: '/api/analyze - This status message'
+    },
+    example_request: {
+      url: 'https://www.linkedin.com/in/some-profile/',
+      maxLikes: 20,
+      format: 'json' // or 'csv'
     }
   });
 }
 
-// Cleanup on process termination
+// ==========================================================================
+// 🧹 CLEANUP ON PROCESS TERMINATION
+// ==========================================================================
 process.on('SIGTERM', async () => { 
-  console.log('SIGTERM received, cleaning up...');
+  console.log('\n🔴 SIGTERM received, cleaning up...');
   if (activeScraper) {
     await activeScraper.close();
     activeScraper = null;
@@ -483,9 +581,14 @@ process.on('SIGTERM', async () => {
 });
 
 process.on('SIGINT', async () => { 
-  console.log('SIGINT received, cleaning up...');
+  console.log('\n🔴 SIGINT received, cleaning up...');
   if (activeScraper) {
     await activeScraper.close();
     activeScraper = null;
   }
+});
+
+// Handle unhandled rejections
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
 });
