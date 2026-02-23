@@ -6,6 +6,9 @@ const path = require('path');
 console.log('\n' + '='.repeat(60));
 console.log('🔧 INSTALLING CHROME FOR PUPPETEER');
 console.log('='.repeat(60));
+console.log(`📂 Current directory: ${process.cwd()}`);
+console.log(`💻 Platform: ${process.platform}`);
+console.log(`🌎 Render: ${!!process.env.RENDER}`);
 
 // Use Render's persistent disk
 const cacheDir = '/opt/render/.cache/puppeteer';
@@ -29,7 +32,6 @@ process.env.PUPPETEER_SKIP_CHROME_DOWNLOAD = 'false';
 try {
   console.log('\n📥 Downloading Chrome...');
   
-  // Download Chrome
   execSync('npx puppeteer browsers install chrome', {
     stdio: 'inherit',
     env: {
@@ -37,24 +39,16 @@ try {
       PUPPETEER_CACHE_DIR: cacheDir,
       PUPPETEER_SKIP_CHROME_DOWNLOAD: 'false'
     },
-    timeout: 300000 // 5 minutes
+    timeout: 300000
   });
   
-  console.log('\n✅ Chrome installed successfully!');
+  console.log('\n✅ Chrome downloaded successfully!');
   
-  // Find and verify Chrome
+  // Verify installation
   const chromeBaseDir = path.join(cacheDir, 'chrome');
   if (fs.existsSync(chromeBaseDir)) {
     const versions = fs.readdirSync(chromeBaseDir);
-    if (versions.length > 0) {
-      const chromePath = path.join(chromeBaseDir, versions[0], 'chrome-linux64', 'chrome');
-      console.log(`📍 Chrome path: ${chromePath}`);
-      
-      if (fs.existsSync(chromePath)) {
-        fs.chmodSync(chromePath, 0o755);
-        console.log('✅ Chrome is ready to use');
-      }
-    }
+    console.log(`📂 Chrome versions: ${versions.join(', ')}`);
   }
   
 } catch (error) {
