@@ -150,7 +150,7 @@ export class LinkedInScraper {
       throw new Error('Invalid li_at cookie format');
     }
 
-    // ✅ UPDATED: Render-compatible launch options
+    // ✅ Render-compatible launch options
     const launchOptions: any = {
       headless: true, // Must be true on Render (no GUI)
       args: [
@@ -582,8 +582,9 @@ export class LinkedInScraper {
   // ==========================================================================
   private async extractFromExperienceSection(page: Page): Promise<{ jobTitle: string; company: string } | null> {
     try {
-      console.log('   🔍 Searching for experience section using HTML tags...');
+      console.log('   🔍 Searching for experience section...');
 
+      // Scroll to load experience section
       for (let i = 0; i < 5; i++) {
         await page.evaluate(() => {
           window.scrollBy(0, 800);
@@ -631,190 +632,110 @@ export class LinkedInScraper {
           return text.length > 2 && /^[A-Z]/.test(text);
         };
 
-        const findExperienceByHeading = (): Element | null => {
-          const headingTags = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'span', 'div'];
-          for (const tag of headingTags) {
-            const elements = document.querySelectorAll(tag);
-            for (const el of elements) {
-              const text = el.textContent?.trim().toLowerCase() || '';
-              if (text === 'experience' || text.includes('experience')) {
-                return el.closest('section, div[data-view-name], .pvs-list__container, .pvs-list, article') || el.parentElement;
-              }
+        // Find experience section by various methods
+        const findExperienceSection = (): Element | null => {
+          // By heading
+          const headings = document.querySelectorAll('h2, h3, .pvs-header__title, .profile-section-title');
+          for (const heading of headings) {
+            if (heading.textContent?.toLowerCase().includes('experience')) {
+              return heading.closest('section, .pvs-list__container, .pvs-list') || heading.parentElement;
             }
           }
-          return null;
-        };
-
-        const findExperienceByAria = (): Element | null => {
+          
+          // By ARIA label
           const sections = document.querySelectorAll('section[aria-label*="Experience" i], section[aria-label*="experience" i]');
-          return sections.length > 0 ? sections[0] : null;
-        };
-
-        const findExperienceById = (): Element | null => {
-          return document.querySelector('#experience, #experience-section, .experience-section');
-        };
-
-        const findExperienceByClass = (): Element | null => {
+          if (sections.length > 0) return sections[0];
+          
+          // By ID
+          const byId = document.querySelector('#experience, #experience-section');
+          if (byId) return byId;
+          
+          // By class patterns
           const classPatterns = [
             '.pvs-list__container',
             '.pvs-list',
             '[data-view-name="profile-components"]',
-            '.pvs-entity',
-            '.pvs-list__item',
-            '.experience-item',
+            '.experience-section',
             '.profile-section-card'
           ];
           for (const pattern of classPatterns) {
             const elements = document.querySelectorAll(pattern);
             for (const el of elements) {
-              const hasDates = el.querySelector('span[aria-hidden="true"]') || 
-                               el.textContent?.match(/\d{4}/) ||
-                               el.textContent?.toLowerCase().includes('present') ||
-                               el.textContent?.toLowerCase().includes('current');
-              if (hasDates) return el;
+              if (el.textContent?.toLowerCase().includes('experience')) {
+                return el;
+              }
             }
           }
+          
           return null;
         };
 
-        let experienceSection = findExperienceByHeading() || 
-                               findExperienceByAria() || 
-                               findExperienceById() || 
-                               findExperienceByClass();
-
-        if (!experienceSection) {
-          const allLists = document.querySelectorAll('ul, ol, .pvs-list');
-          for (const list of allLists) {
-            const items = list.querySelectorAll('li, .pvs-list__item');
-            if (items.length > 0) {
-              const firstItem = items[0];
-              const itemText = firstItem.textContent || '';
-              if (itemText.includes('·') || itemText.includes('at') || itemText.includes('@') || itemText.match(/\d{4}/)) {
-                experienceSection = list;
-                break;
-              }
-            }
-          }
-        }
-
+        const experienceSection = findExperienceSection();
         if (!experienceSection) return null;
 
-        const experienceItems = experienceSection.querySelectorAll('li, .pvs-entity, [data-view-name="profile-components"], .pvs-list__item, .pvs-entity--padded');
+        // Find experience items
+        const experienceItems = experienceSection.querySelectorAll('li, .pvs-entity, .pvs-list__item, [data-view-name="profile-components"]');
         if (experienceItems.length === 0) return null;
 
         const firstItem = experienceItems[0];
+        
+        // Try different extraction methods
+        let jobTitle = '';
+        let company = '';
 
-        const spans = firstItem.querySelectorAll('span[aria-hidden="true"]');
-        if (spans.length >= 2) {
-          const jobTitle = cleanText(spans[0].textContent);
-          const company = cleanText(spans[1].textContent);
+        // Method 1: Look for spans with aria-hidden
+        const ariaSpans = firstItem.querySelectorAll('span[aria-hidden="true"]');
+        if (ariaSpans.length >= 2) {
+          jobTitle = cleanText(ariaSpans[0].textContent);
+          company = cleanText(ariaSpans[1].textContent);
           if (jobTitle && company) return { jobTitle, company };
         }
 
-        const displayFlexElements = firstItem.querySelectorAll('.display-flex, .flex-row, .flex');
-        for (const flexEl of displayFlexElements) {
-          const flexSpans = flexEl.querySelectorAll('span');
-          if (flexSpans.length >= 2) {
-            const firstSpan = cleanText(flexSpans[0].textContent);
-            const secondSpan = cleanText(flexSpans[1].textContent);
-            if (firstSpan && secondSpan) {
-              if (isJobTitle(firstSpan) && isCompany(secondSpan)) {
-                return { jobTitle: firstSpan, company: secondSpan };
-              } else if (isCompany(firstSpan) && isJobTitle(secondSpan)) {
-                return { jobTitle: secondSpan, company: firstSpan };
-              }
-            }
-          }
-        }
-
-        const strongTags = firstItem.querySelectorAll('strong, b, .t-bold');
-        if (strongTags.length > 0) {
-          const jobTitle = cleanText(strongTags[0].textContent);
-          let company = '';
-          const container = strongTags[0].closest('div, li, .pvs-entity');
-          if (container) {
-            const textElements = container.querySelectorAll('span, div, .t-14, .t-normal, .t-black--light');
-            for (const el of textElements) {
-              const text = cleanText(el.textContent);
-              if (text && text !== jobTitle && text.length > 2 && isCompany(text)) {
-                company = text;
-                break;
-              }
-            }
-          }
-          if (jobTitle && company) return { jobTitle, company };
-        }
-
-        const allText = firstItem.textContent || '';
-        const datePattern = /\d{4}\s*[-–—]\s*(\d{4}|Present|Current)/i;
-        const dateMatch = allText.match(datePattern);
-        if (dateMatch) {
-          const textBeforeDate = allText.substring(0, dateMatch.index).trim();
-          const separators = ['\n', '·', '|', '•', '-', '–', '—'];
-          let parts = [textBeforeDate];
-          for (const sep of separators) {
-            if (textBeforeDate.includes(sep)) {
-              parts = textBeforeDate.split(sep).map(p => cleanText(p)).filter(p => p.length > 0);
-              break;
-            }
-          }
-          if (parts.length >= 2) {
-            return { jobTitle: parts[0], company: parts[1] };
-          } else if (parts.length === 1) {
-            const atMatch = parts[0].match(/(.+?)\s+(?:at|@)\s+(.+)/i);
-            if (atMatch) {
-              return { jobTitle: cleanText(atMatch[1]), company: cleanText(atMatch[2]) };
-            }
-          }
-        }
-
-        const patterns = [
-          { regex: /(.+?)\s+at\s+(.+?)(?:\n|$)/i, jobIdx: 1, companyIdx: 2 },
-          { regex: /(.+?)\s+@\s+(.+?)(?:\n|$)/i, jobIdx: 1, companyIdx: 2 },
-          { regex: /(.+?)\s+·\s+(.+?)(?:\n|$)/i, jobIdx: 1, companyIdx: 2 },
-          { regex: /(.+?)\s+[-–—]\s+(.+?)(?:\n|$)/i, jobIdx: 1, companyIdx: 2 },
-          { regex: /(.+?)\s+\|\s+(.+?)(?:\n|$)/i, jobIdx: 2, companyIdx: 1 },
-          { regex: /(.+?)\s+•\s+(.+?)(?:\n|$)/i, jobIdx: 2, companyIdx: 1 }
-        ];
-        for (const pattern of patterns) {
-          const match = allText.match(pattern.regex);
-          if (match) {
-            const potentialJob = cleanText(match[pattern.jobIdx]);
-            const potentialCompany = cleanText(match[pattern.companyIdx]);
-            if (potentialJob.length > 2 && potentialCompany.length > 2) {
-              return { jobTitle: potentialJob, company: potentialCompany };
-            }
-          }
-        }
-
+        // Method 2: Look for company link
         const companyLink = firstItem.querySelector('a[href*="/company/"]');
         if (companyLink) {
-          const company = cleanText(companyLink.textContent);
-          let jobTitle = '';
-          const allSpans = firstItem.querySelectorAll('span');
-          for (const span of allSpans) {
-            const text = cleanText(span.textContent);
-            if (text && text !== company && text.length > 2 && isJobTitle(text)) {
-              jobTitle = text;
-              break;
-            }
+          company = cleanText(companyLink.textContent);
+          // Find job title near the company
+          const possibleJobTitle = firstItem.querySelector('.t-bold, strong, b, .pv-entity__summary-info h3');
+          if (possibleJobTitle) {
+            jobTitle = cleanText(possibleJobTitle.textContent);
           }
-          if (company && jobTitle) return { jobTitle, company };
+          if (jobTitle && company) return { jobTitle, company };
         }
 
-        const allTextElements = firstItem.querySelectorAll('span, div, .t-14, .t-bold, .t-normal');
-        const textContents: string[] = [];
-        allTextElements.forEach(el => {
-          const text = cleanText(el.textContent);
-          if (text && text.length > 2 && !text.match(/^\d+$/) && !text.includes('ago') && !text.includes('·')) {
-            textContents.push(text);
+        // Method 3: Look for date pattern to identify experience entry
+        const datePattern = /\d{4}\s*[-–—]\s*(\d{4}|Present|Current)/i;
+        const itemText = firstItem.textContent || '';
+        if (datePattern.test(itemText)) {
+          const textParts = itemText.split('\n').filter(p => p.trim().length > 0);
+          if (textParts.length >= 2) {
+            jobTitle = cleanText(textParts[0]);
+            company = cleanText(textParts[1]);
+            if (jobTitle && company) return { jobTitle, company };
           }
-        });
-        if (textContents.length >= 2) {
-          const uniqueTexts = [...new Set(textContents)];
-          if (uniqueTexts.length >= 2) {
-            return { jobTitle: uniqueTexts[0], company: uniqueTexts[1] };
+        }
+
+        // Method 4: Try to extract from structure
+        const boldElements = firstItem.querySelectorAll('.t-bold, strong, b, .pv-entity__summary-info h3');
+        if (boldElements.length > 0) {
+          jobTitle = cleanText(boldElements[0].textContent);
+          
+          // Look for company after the job title
+          const parent = boldElements[0].parentElement;
+          if (parent) {
+            const nextElements = parent.querySelectorAll('.t-14, .t-normal, .pv-entity__secondary-title');
+            for (const el of nextElements) {
+              const text = cleanText(el.textContent);
+              if (text && text !== jobTitle && text.length > 2) {
+                if (isCompany(text)) {
+                  company = text;
+                  break;
+                }
+              }
+            }
           }
+          
+          if (jobTitle && company) return { jobTitle, company };
         }
 
         return null;
@@ -828,7 +749,7 @@ export class LinkedInScraper {
   }
 
   // ==========================================================================
-  // ✅ STEP 2: SCRAPE NAME, JOB TITLE, COMPANY FROM PROFILE PAGE
+  // ✅ STEP 2: SCRAPE NAME, JOB TITLE, COMPANY FROM PROFILE PAGE (ENHANCED)
   // ==========================================================================
   private async scrapeProfilePage(profileUrl: string): Promise<{
     name: string;
@@ -871,6 +792,9 @@ export class LinkedInScraper {
           };
         }
 
+        // Wait for the page to load properly
+        await this.delay(3000);
+
         try {
           await newPage.waitForSelector('.pv-top-card, .profile-card, .top-card-layout', {
             timeout: 15000
@@ -881,10 +805,9 @@ export class LinkedInScraper {
           await this.delay(5000);
         }
 
-        await this.delay(3000);
-
-        // ---- MAIN EXTRACTION (TOP CARD) ----
+        // ===== ENHANCED EXTRACTION WITH MULTIPLE SELECTORS =====
         let profileData = await newPage.evaluate(() => {
+          // Helper function to get text from multiple selectors
           const getText = (selectors: string[]): string => {
             for (const selector of selectors) {
               const el = document.querySelector(selector);
@@ -895,7 +818,7 @@ export class LinkedInScraper {
             return '';
           };
 
-          // ----- NAME -----
+          // ----- ENHANCED NAME SELECTORS -----
           const nameSelectors = [
             'h1',
             '.top-card-layout__title',
@@ -903,7 +826,13 @@ export class LinkedInScraper {
             '.profile-card__content h1',
             '.pv-top-card-v2-section__name',
             '.inline-show-more-text',
-            '[data-anonymize="person-name"]'
+            '[data-anonymize="person-name"]',
+            '.feed-shared-actor__name',
+            '.update-components-actor__name',
+            '.profile-card__content h1',
+            '.mt2 h1',
+            '.ph5 h1',
+            '.pv-text-details__left-panel h1'
           ];
           
           let name = getText(nameSelectors);
@@ -925,7 +854,7 @@ export class LinkedInScraper {
           
           name = name || 'Not specified';
 
-          // ----- HEADLINE -----
+          // ----- ENHANCED HEADLINE SELECTORS (JOB TITLE & COMPANY) -----
           const headlineSelectors = [
             '.text-body-medium',
             '.top-card-layout__headline',
@@ -934,47 +863,68 @@ export class LinkedInScraper {
             '.profile-headline',
             '.pv-top-card-v2-section__headline',
             '[data-anonymize="headline"]',
-            '.mt2 .text-body-medium'
+            '.mt2 .text-body-medium',
+            '.ph5 .text-body-medium',
+            '.pv-text-details__left-panel .text-body-medium',
+            '.inline-show-more-text--full',
+            '.pv-entity__summary-info h3',
+            '.pv-entity__secondary-title',
+            '.t-14.t-normal',
+            '.display-flex .t-14',
+            '.pv-entity__company-details h3'
           ];
           
           const headline = getText(headlineSelectors);
 
-          // ----- COMPANY FROM BUTTON -----
-          const companyButtonSelectors = [
+          // ----- ENHANCED COMPANY FROM BUTTON OR TEXT -----
+          const companySelectors = [
             '.KUjVsMOGSJBXjUxWSEPApVwUXYrHVRNBGs',
             'button[aria-label*="Current company"]',
             'button[aria-label*="company"]',
             '.pv-text-details__right-panel-item-link',
             '.inline-show-more-text--full',
             '.pv-text-details__right-panel-item-text',
-            '.tSUXRtrHvgJfWMazJfDcElPUMAPbdhFczmxPHw'
+            '.tSUXRtrHvgJfWMazJfDcElPUMAPbdhFczmxPHw',
+            '.pv-entity__company-details h3 span',
+            '.pv-entity__secondary-title',
+            '.pv-entity__company-details .t-14',
+            '.experience-section .t-14.t-black',
+            '[data-field="experience_company_logo"] + div span'
           ];
           
           let companyFromButton = 'Not specified';
-          for (const selector of companyButtonSelectors) {
-            const companyButton = document.querySelector(selector);
-            if (companyButton) {
-              const buttonText = companyButton.textContent?.trim();
-              if (buttonText && buttonText !== 'flex' && buttonText.length > 1) {
-                if (buttonText.length < 50 && !buttonText.includes('linkedin') && !buttonText.includes('profile')) {
-                  companyFromButton = buttonText;
-                  break;
-                }
-              }
-              
-              const ariaLabel = companyButton.getAttribute('aria-label');
-              if (ariaLabel) {
+          
+          // First try to get company from aria-label buttons
+          for (const selector of companySelectors) {
+            const elements = document.querySelectorAll(selector);
+            for (const el of elements) {
+              // Check aria-label first
+              const ariaLabel = el.getAttribute('aria-label');
+              if (ariaLabel && ariaLabel.includes('Current company')) {
                 const companyMatch = ariaLabel.match(/Current company:\s*([^.]+)/i);
                 if (companyMatch) {
                   companyFromButton = companyMatch[1].trim();
                   break;
                 }
-                
-                if (ariaLabel.length < 50 && !ariaLabel.includes('linkedin')) {
-                  companyFromButton = ariaLabel;
+              }
+              
+              // Then check text content
+              const text = el.textContent?.trim();
+              if (text && text !== 'flex' && text.length > 2 && text.length < 50) {
+                if (!text.includes('linkedin') && !text.includes('profile') && !text.includes('·')) {
+                  companyFromButton = text;
                   break;
                 }
               }
+            }
+            if (companyFromButton !== 'Not specified') break;
+          }
+
+          // Try to get company from experience section if not found
+          if (companyFromButton === 'Not specified') {
+            const experienceCompany = document.querySelector('.pv-entity__company-details h3 span, .pv-entity__secondary-title');
+            if (experienceCompany && experienceCompany.textContent) {
+              companyFromButton = experienceCompany.textContent.trim();
             }
           }
 
@@ -983,99 +933,136 @@ export class LinkedInScraper {
 
         let { name, headline, companyFromButton } = profileData;
         let jobTitle = 'Not specified';
-        let company = companyFromButton; // Start with button-extracted company
+        let company = companyFromButton;
 
-        // ---- Parse headline to get job title and possibly company (with validation) ----
+        // Log what we found
+        console.log(`   📝 Raw headline: "${headline}"`);
+        console.log(`   🏢 Raw company from button: "${companyFromButton}"`);
+
+        // ===== ENHANCED HEADLINE PARSING =====
         if (headline && headline !== 'Not specified') {
-          const separators = [' at ', ' @ ', ' · ', ' - ', ' | ', ' • ', ' / ', ' , '];
+          // Common separators between job title and company
+          const separators = [
+            ' at ', ' @ ', ' · ', ' - ', ' – ', ' — ', ' | ', ' • ', ' / ', ' , ', ' in ', ' presso '
+          ];
+          
           let foundSeparator = false;
           
+          // Try each separator
           for (const sep of separators) {
             if (headline.includes(sep)) {
               const parts = headline.split(sep);
-              const potentialJobTitle = parts[0].trim();
-              const potentialCompany = parts.slice(1).join(sep).trim();
-              
-              // Always use the first part as job title (it's almost always the job title)
-              if (potentialJobTitle && potentialJobTitle.length > 1) {
-                jobTitle = potentialJobTitle;
+              if (parts.length >= 2) {
+                const firstPart = parts[0].trim();
+                const remainingParts = parts.slice(1).join(sep).trim();
+                
+                // Usually the first part is the job title
+                if (firstPart && firstPart.length > 2) {
+                  jobTitle = firstPart;
+                  console.log(`   ✅ Job title from headline: "${jobTitle}"`);
+                }
+                
+                // Check if remaining part looks like a company
+                if (company === 'Not specified' && remainingParts && remainingParts.length > 2) {
+                  // Check if it's a valid company name (not just a location or random text)
+                  if (this.looksLikeCompany(remainingParts) || remainingParts.split(' ').length < 5) {
+                    company = remainingParts;
+                    console.log(`   ✅ Company from headline: "${company}"`);
+                  } else {
+                    console.log(`   ⚠️ Potential company "${remainingParts}" didn't pass validation`);
+                  }
+                }
+                
+                foundSeparator = true;
+                break;
               }
-              
-              // Only use potentialCompany if it looks like a company AND we don't already have a company from button
-              if (company === 'Not specified' && potentialCompany && this.looksLikeCompany(potentialCompany)) {
-                company = potentialCompany;
-                console.log(`   ✅ Valid company extracted from headline: "${company}"`);
-              } else if (company === 'Not specified') {
-                console.log(`   ⚠️ Potential company "${potentialCompany}" did not pass validation, will try other methods`);
-              }
-              
-              foundSeparator = true;
-              break;
             }
           }
           
-          if (!foundSeparator && company === 'Not specified') {
-            // No separator found; treat entire headline as job title
-            if (headline.length > 1) {
+          // If no separator found, try to parse common patterns
+          if (!foundSeparator) {
+            // Try to detect if headline contains "at" or similar without spaces
+            const atPattern = /(.+)(?:at|@)(.+)/i;
+            const atMatch = headline.match(atPattern);
+            if (atMatch) {
+              const potentialJob = atMatch[1].trim();
+              const potentialCompany = atMatch[2].trim();
+              
+              if (potentialJob.length > 2) {
+                jobTitle = potentialJob;
+              }
+              
+              if (company === 'Not specified' && potentialCompany.length > 2) {
+                if (this.looksLikeCompany(potentialCompany) || potentialCompany.split(' ').length < 5) {
+                  company = potentialCompany;
+                }
+              }
+              foundSeparator = true;
+            }
+            
+            // If still no separator, just use the whole headline as job title
+            if (!foundSeparator && headline.length > 2) {
               jobTitle = headline;
+              console.log(`   ℹ️ Using entire headline as job title: "${jobTitle}"`);
             }
           }
         }
 
         // Clean company from employment type suffixes
         if (company && company !== 'Not specified') {
+          const oldCompany = company;
           company = this.cleanCompany(company);
+          if (oldCompany !== company) {
+            console.log(`   🧹 Cleaned company: "${oldCompany}" → "${company}"`);
+          }
         }
 
-        // Treat "--" as missing job title
+        // Check if we need to look in experience section
         const jobTitleMissing = !jobTitle || jobTitle === 'Not specified' || jobTitle === '--' || jobTitle.trim() === '';
         const companyMissing = !company || company === 'Not specified' || company.trim() === '';
 
-        // Try to extract company from headline using extractCompanyFromHeadline (which already includes validation)
-        if (companyMissing && headline) {
-          console.log('   🔍 Trying to extract company from headline (secondary method)...');
-          const extractedCompany = this.extractCompanyFromHeadline(headline);
-          if (extractedCompany) {
-            company = extractedCompany;
-            console.log(`   ✅ Found company in headline: "${company}"`);
+        // If company is still missing but we have job title with "at", try to extract
+        if (companyMissing && jobTitle && (jobTitle.includes(' at ') || jobTitle.includes(' @ '))) {
+          const parts = jobTitle.split(/ at | @ /);
+          if (parts.length >= 2) {
+            jobTitle = parts[0].trim();
+            if (companyMissing && parts[1].trim().length > 2) {
+              company = parts[1].trim();
+              console.log(`   ✅ Extracted company from job title: "${company}"`);
+            }
           }
         }
 
-        // ===== FALLBACK: If company or job title missing/malformed, scroll to experience section =====
-        const needsExperience = 
-          companyMissing || 
-          jobTitleMissing || 
-          (jobTitle && (jobTitle.includes(' at ') || jobTitle.includes(' @ ')));
-
-        if (needsExperience) {
-          console.log('   🔍 Company or job title missing/malformed, checking experience section...');
+        // ===== FALLBACK: Try experience section if needed =====
+        if (jobTitleMissing || companyMissing) {
+          console.log('   🔍 Missing data, checking experience section...');
           const experienceData = await this.extractFromExperienceSection(newPage);
           if (experienceData) {
-            if (companyMissing && experienceData.company && experienceData.company !== 'Not specified') {
-              company = this.cleanCompany(experienceData.company);
-            }
             if (jobTitleMissing && experienceData.jobTitle && experienceData.jobTitle !== 'Not specified') {
               jobTitle = experienceData.jobTitle;
+              console.log(`   ✅ Job title from experience: "${jobTitle}"`);
             }
-            
-            // If job title still contains company info, clean it
-            if (jobTitle && (jobTitle.includes(' at ') || jobTitle.includes(' @ '))) {
-              jobTitle = jobTitle.split(/ at | @ /)[0].trim();
+            if (companyMissing && experienceData.company && experienceData.company !== 'Not specified') {
+              company = this.cleanCompany(experienceData.company);
+              console.log(`   ✅ Company from experience: "${company}"`);
             }
           }
         }
 
-        // Final cleanup
+        // Final cleanup - ensure we don't have "at" or " @" in job title
         if (jobTitle && (jobTitle.includes(' at ') || jobTitle.includes(' @ '))) {
           jobTitle = jobTitle.split(/ at | @ /)[0].trim();
         }
 
-        // Ensure we don't return "--" as job title
+        // Ensure we don't return "--" or empty strings
         if (jobTitle === '--' || jobTitle?.trim() === '') {
           jobTitle = 'Not specified';
         }
+        if (company === '--' || company?.trim() === '') {
+          company = 'Not specified';
+        }
 
-        console.log(`   ✅ Extracted: "${name}" | Job: "${jobTitle}" | Company: "${company}"`);
+        console.log(`   ✅ FINAL: "${name}" | Job: "${jobTitle}" | Company: "${company}"`);
         
         return {
           name,
@@ -1088,7 +1075,8 @@ export class LinkedInScraper {
         lastError = error;
         retries--;
         if (retries > 0) {
-          console.log(`   ⚠️ Retry ${3 - retries}/3 failed, waiting before next attempt...`);
+          console.log(`   ⚠️ Retry ${3 - retries}/3 failed: ${error.message}`);
+          console.log(`   ⏳ Waiting before next attempt...`);
           await this.delay(5000);
         }
       } finally {

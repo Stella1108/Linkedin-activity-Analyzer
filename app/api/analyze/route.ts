@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import LinkedInScraper, { ScrapeResult, LinkedInProfileData } from '@/lib/puppeteer-scraper';
+import fs from 'fs';
+import path from 'path';
+import { execSync } from 'child_process';
 
 // Initialize Supabase client
 const supabase = createClient(
@@ -12,21 +15,18 @@ const supabase = createClient(
 let activeScraper: LinkedInScraper | null = null;
 
 // ==========================================================================
-// 🛡️ SAFE CSV CONVERSION - EXACT 4 COLUMNS IN CORRECT ORDER
+// 🛡️ SAFE CSV CONVERSION
 // ==========================================================================
 function convertToCSV(data: any[]): string {
   if (!data || data.length === 0) return '';
-
   const headers = ['Name', 'Company', 'Job Title', 'Profile URL'];
-  const csvRows = [];
-  csvRows.push(headers.join(','));
+  const csvRows = [headers.join(',')];
 
   for (const row of data) {
     const escape = (str: string) => {
       if (!str) return '""';
       return `"${String(str).replace(/"/g, '""')}"`;
     };
-
     const values = [
       escape(row.name || ''),
       escape(row.company || 'Not specified'),
@@ -35,8 +35,122 @@ function convertToCSV(data: any[]): string {
     ];
     csvRows.push(values.join(','));
   }
-
   return csvRows.join('\n');
+}
+
+// ==========================================================================
+// 🔍 CHECK IF CHROME IS INSTALLED AND GET ITS PATH (ENHANCED)
+// ==========================================================================
+async function ensureChromeInstalled(): Promise<string | null> {
+  console.log('🔍 Checking Chrome installation...');
+  
+  // Log environment for debugging
+  console.log('📂 Current working directory:', process.cwd());
+  console.log('📂 Node modules path:', path.join(process.cwd(), 'node_modules'));
+  
+  // Possible Chrome paths (in order of preference)
+  const possiblePaths = [
+    process.env.PUPPETEER_EXECUTABLE_PATH,
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
+    '/opt/render/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome',
+    path.join(process.cwd(), 'node_modules', '.cache', 'puppeteer', 'chrome', 'linux-*', 'chrome-linux64', 'chrome'),
+    path.join('/opt/render/project/src', 'node_modules', '.cache', 'puppeteer', 'chrome', 'linux-*', 'chrome-linux64', 'chrome')
+  ];
+
+  // Check each path
+  for (const pattern of possiblePaths) {
+    if (!pattern) continue;
+    
+    // Handle wildcards
+    if (pattern.includes('*')) {
+      const basePath = pattern.split('*')[0];
+      const parentDir = path.dirname(basePath);
+      
+      try {
+        if (fs.existsSync(parentDir)) {
+          const files = fs.readdirSync(parentDir);
+          const matchingDir = files.find(f => f.startsWith('linux-'));
+          if (matchingDir) {
+            const fullPath = pattern.replace('*', matchingDir);
+            if (fs.existsSync(fullPath)) {
+              console.log(`✅ Chrome found at: ${fullPath}`);
+              // Make it executable
+              try {
+                fs.chmodSync(fullPath, 0o755);
+              } catch (e) {}
+              return fullPath;
+            }
+          }
+        }
+      } catch (error) {
+        console.log(`⚠️ Error checking path ${pattern}:`, error);
+      }
+    } else {
+      if (fs.existsSync(pattern)) {
+        console.log(`✅ Chrome found at: ${pattern}`);
+        return pattern;
+      }
+    }
+  }
+
+  console.log('❌ Chrome not found in any expected location');
+  
+  // Try to download Chrome on Render
+  if (process.env.RENDER || process.env.NODE_ENV === 'production') {
+    console.log('📥 Attempting to download Chrome...');
+    
+    // Create cache directory
+    const cacheDir = path.join(process.cwd(), 'node_modules', '.cache', 'puppeteer');
+    if (!fs.existsSync(cacheDir)) {
+      fs.mkdirSync(cacheDir, { recursive: true });
+    }
+    
+    // Set environment variable for cache directory
+    process.env.PUPPETEER_CACHE_DIR = cacheDir;
+    process.env.PUPPETEER_SKIP_CHROME_DOWNLOAD = 'false';
+    
+    try {
+      // Try multiple download methods
+      const downloadCommands = [
+        'npx puppeteer browsers install chrome',
+        'node node_modules/puppeteer/install.mjs',
+        'npm run postinstall'
+      ];
+      
+      for (const cmd of downloadCommands) {
+        try {
+          console.log(`🔄 Trying: ${cmd}`);
+          execSync(cmd, { 
+            stdio: 'inherit',
+            env: { 
+              ...process.env, 
+              PUPPETEER_CACHE_DIR: cacheDir,
+              PUPPETEER_SKIP_CHROME_DOWNLOAD: 'false'
+            },
+            timeout: 120000 // 2 minute timeout
+          });
+          console.log(`✅ Command succeeded: ${cmd}`);
+          break;
+        } catch (e) {
+          console.log(`⚠️ Command failed: ${cmd}`);
+        }
+      }
+      
+      console.log('✅ Chrome download attempted');
+      
+      // Check again after download
+      return await ensureChromeInstalled();
+    } catch (downloadError) {
+      console.error('❌ Failed to download Chrome:', downloadError);
+      return null;
+    }
+  }
+  
+  return null;
 }
 
 // Function to get LinkedIn cookie from database
@@ -50,7 +164,7 @@ async function getLinkedInCookie(): Promise<LinkedInProfileData | null> {
       .eq('is_active', true)
       .order('updated_at', { ascending: false })
       .limit(1)
-      .maybeSingle(); // Changed from .single() to .maybeSingle() to avoid error when no results
+      .maybeSingle();
 
     if (error) {
       console.error('❌ Database error:', error.message);
@@ -83,7 +197,7 @@ async function getLinkedInCookie(): Promise<LinkedInProfileData | null> {
   }
 }
 
-// Increase timeout for Vercel
+// Increase timeout for Render
 export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
@@ -95,7 +209,7 @@ export async function POST(request: NextRequest) {
   console.log('='.repeat(80));
 
   try {
-    // Parse request body with error handling
+    // Parse request body
     let body;
     try {
       body = await request.json();
@@ -119,28 +233,58 @@ export async function POST(request: NextRequest) {
 
     if (!url.includes('linkedin.com')) {
       return NextResponse.json(
-        { success: false, error: 'Valid LinkedIn URL required (must contain linkedin.com)' },
+        { success: false, error: 'Valid LinkedIn URL required' },
         { status: 400 }
       );
     }
 
     console.log(`🔗 URL: ${url}`);
     console.log(`🎯 Max Profiles: ${maxLikes}`);
-    console.log(`📊 Format: ${format}`);
 
-    // Get cookies
-    console.log('\n🔍 Step 1: Getting LinkedIn cookies...');
+    // ✅ STEP 1: Ensure Chrome is installed
+    console.log('\n🔍 Step 1: Checking Chrome installation...');
+    const chromePath = await ensureChromeInstalled();
+    
+    if (!chromePath) {
+      // Provide helpful instructions
+      const errorMessage = `Chrome browser not found and could not be installed. 
+        Please ensure your package.json has "postinstall": "puppeteer browsers install chrome" 
+        and redeploy. If issue persists, check Render build logs.`;
+      
+      console.error('❌', errorMessage);
+      
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: 'Chrome browser not found and could not be installed. Please check your deployment configuration.',
+          solution: 'Add "postinstall": "puppeteer browsers install chrome" to package.json scripts',
+          docs: 'https://pptr.dev/guides/configuration'
+        },
+        { status: 503 }
+      );
+    }
+    
+    // Set environment variable for Puppeteer
+    process.env.PUPPETEER_EXECUTABLE_PATH = chromePath;
+    console.log(`✅ Chrome path set to: ${chromePath}`);
+
+    // ✅ STEP 2: Get cookies
+    console.log('\n🔍 Step 2: Getting LinkedIn cookies...');
     const cookies = await getLinkedInCookie();
     if (!cookies) {
       return NextResponse.json(
-        { success: false, error: 'No active LinkedIn cookies found. Please add a valid li_at cookie to the database.' },
+        { 
+          success: false, 
+          error: 'No active LinkedIn cookies found. Please add a valid li_at cookie to the database.',
+          instructions: 'Go to /cookies page to add your LinkedIn li_at cookie.'
+        },
         { status: 503 }
       );
     }
     console.log(`✅ Using cookies for: ${cookies.name || 'LinkedIn User'}`);
 
-    // Initialize scraper
-    console.log('\n🚀 Step 2: Initializing scraper...');
+    // ✅ STEP 3: Initialize scraper
+    console.log('\n🚀 Step 3: Initializing scraper...');
     scraper = new LinkedInScraper();
     activeScraper = scraper;
 
@@ -149,12 +293,10 @@ export async function POST(request: NextRequest) {
       const startInit = Date.now();
       await scraper.initialize(cookies, url);
       console.log(`✅ Browser initialized in ${Math.round((Date.now() - startInit)/1000)}s`);
-      console.log('⏳ Waiting 2 seconds for page stabilization...');
       await new Promise(resolve => setTimeout(resolve, 2000));
     } catch (initError: any) {
       console.error('❌ Failed to initialize:', initError.message);
       
-      // Clean up
       if (scraper) {
         await scraper.close();
         activeScraper = null;
@@ -163,18 +305,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { 
           success: false, 
-          error: `Browser initialization failed: ${initError.message}. This could be due to: 
-            1. Expired LinkedIn cookie
-            2. LinkedIn blocking automated access
-            3. Network issues`,
-          details: initError.message
+          error: `Browser initialization failed: ${initError.message}`,
+          details: {
+            chrome_path: chromePath,
+            cookie_valid: !!cookies
+          }
         },
         { status: 500 }
       );
     }
 
-    // Perform scraping
-    console.log('\n🎯 Step 3: Starting scraping...');
+    // ✅ STEP 4: Perform scraping
+    console.log('\n🎯 Step 4: Starting scraping...');
     let result: ScrapeResult;
     const startTime = Date.now();
 
@@ -208,7 +350,6 @@ export async function POST(request: NextRequest) {
     }
 
     if (!result.success) {
-      console.error('❌ SCRAPING FAILED:', result.error);
       return NextResponse.json(
         { 
           success: false, 
@@ -219,19 +360,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if we have any data
-    if (!result.data || !result.data.likes || result.data.likes.length === 0) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'No profiles found to scrape. This could mean: 1) The post has no likes, 2) The like modal couldn\'t be opened, or 3) LinkedIn blocked the request',
-          duration: `${totalTime} seconds`
-        },
-        { status: 404 }
-      );
-    }
-
-    // Format data - ONLY 4 REQUIRED FIELDS with validation
+    // Format data
     const formattedData = {
       likes: result.data.likes.map(l => ({
         name: l.name && l.name !== 'Not specified' ? l.name : 'LinkedIn Member',
@@ -242,7 +371,7 @@ export async function POST(request: NextRequest) {
       posts: result.data.posts || []
     };
 
-    // Remove duplicates based on profile URL
+    // Remove duplicates
     const uniqueLikes = Array.from(
       new Map(formattedData.likes.map(item => [item.profileUrl, item])).values()
     );
@@ -253,15 +382,6 @@ export async function POST(request: NextRequest) {
     // Return CSV if requested
     if (format === 'csv') {
       const csvData = convertToCSV(formattedData.likes);
-      
-      // Validate CSV data
-      if (!csvData || csvData.length === 0) {
-        return NextResponse.json(
-          { success: false, error: 'Failed to generate CSV data' },
-          { status: 500 }
-        );
-      }
-
       return new NextResponse(csvData, {
         headers: {
           'Content-Type': 'text/csv',
@@ -281,15 +401,12 @@ export async function POST(request: NextRequest) {
       statistics: {
         total_profiles: formattedData.likes.length,
         total_posts: formattedData.posts.length
-      },
-      sample: formattedData.likes.slice(0, 3)
+      }
     });
 
   } catch (error: any) {
     console.error('\n❌ API ERROR:', error.message);
-    console.error('Stack trace:', error.stack);
     
-    // Clean up
     if (scraper) {
       try {
         await scraper.close();
@@ -302,8 +419,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       { 
         success: false, 
-        error: error.message || 'Internal server error',
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        error: error.message || 'Internal server error'
       },
       { status: 500 }
     );
@@ -311,30 +427,20 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
+  const chromePath = await ensureChromeInstalled();
+  
   return NextResponse.json({
     success: true,
-    message: 'LinkedIn Scraper API - Correct Job Title & Company Extraction',
-    version: '11.0.0',
-    activeScraper: activeScraper ? 'Running' : 'Not running',
-    endpoints: {
-      POST: '/api/linkedin-scraper - Start scraping (requires JSON body with url, maxLikes, format)',
-      GET: '/api/linkedin-scraper - This status message'
+    message: 'LinkedIn Scraper API',
+    version: '1.0.0',
+    chrome: {
+      installed: !!chromePath,
+      path: chromePath || 'Not found',
+      cache_dir: process.env.PUPPETEER_CACHE_DIR || '/home/sbx_user1051/.cache/puppeteer'
     },
-    features: [
-      '✅ Clean names - no "View profile" suffixes',
-      '✅ Job titles properly extracted',
-      '✅ Companies properly extracted',
-      '✅ Handles "Company - Job Title" format correctly',
-      '✅ Handles "Job Title - Company" format correctly',
-      '✅ Profile URLs cleaned and validated',
-      '✅ CSV export with 4 columns: Name, Company, Job Title, Profile URL',
-      '✅ 100% deduplicated results'
-    ],
-    example_request: {
-      url: 'https://www.linkedin.com/in/some-profile/',
-      maxLikes: 20,
-      format: 'json', // or 'csv'
-      keepOpen: false
+    environment: {
+      render: !!process.env.RENDER,
+      node_env: process.env.NODE_ENV
     }
   });
 }
@@ -354,9 +460,4 @@ process.on('SIGINT', async () => {
     await activeScraper.close();
     activeScraper = null;
   }
-});
-
-// Handle unhandled rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
