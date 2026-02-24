@@ -1,0 +1,11 @@
+# fly.toml
+app = "linkedin-activity-analyzer"
+
+[build]
+  builder = "heroku/buildpacks:20"
+
+[env]
+  # Environment variables will be set in dashboard
+
+[worker]
+  command = "npm run start:worker"

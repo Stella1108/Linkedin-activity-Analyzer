@@ -16,7 +16,7 @@ import {
 import { 
   BarChart3, Users, MessageSquare, Globe, Database, CheckCircle, 
   AlertCircle, RefreshCw, LogOut, User, Settings, X, Menu, 
-  Download, ExternalLink, History, Cookie, FileText 
+  Download, ExternalLink, History, Cookie, FileText, Clock, Server
 } from 'lucide-react';
 import { signOut, getCurrentUser } from '@/lib/supabase';
 
@@ -25,6 +25,7 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<ScrapeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null);
   const [isCheckingCookies, setIsCheckingCookies] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -37,12 +38,36 @@ export default function DashboardPage() {
     currentUrl: '',
     browserVisible: false
   });
+  const [apiStatus, setApiStatus] = useState<{available: boolean; message: string} | null>(null);
 
   useEffect(() => {
     checkAuth();
     checkCookieStatus();
     loadAnalysisHistory();
+    checkApiStatus();
   }, []);
+
+  // Check if API is reachable
+  const checkApiStatus = async () => {
+    try {
+      const response = await fetch('/api/cookie-status', { 
+        method: 'GET',
+        signal: AbortSignal.timeout(5000) // 5 second timeout
+      });
+      
+      if (response.ok) {
+        setApiStatus({ available: true, message: 'API is connected' });
+      } else {
+        setApiStatus({ available: false, message: `API returned status ${response.status}` });
+      }
+    } catch (err) {
+      console.error('API status check failed:', err);
+      setApiStatus({ 
+        available: false, 
+        message: 'Cannot connect to API. Backend might be down.' 
+      });
+    }
+  };
 
   const checkAuth = async () => {
     const { user, error } = await getCurrentUser();
@@ -55,31 +80,44 @@ export default function DashboardPage() {
 
   const checkCookieStatus = async () => {
     setIsCheckingCookies(true);
+    setError(null);
+    
     try {
-      const response = await fetch('/api/cookie-status');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+      const response = await fetch('/api/cookie-status', {
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      
       const data = await response.json();
       
-      if (response.ok) {
-        setCookieStatus({
-          hasCookies: data.hasCookies,
-          message: data.message,
-          lastUpdated: data.lastUpdated,
-          cookieName: data.cookieName,
-          cookieCount: data.cookieCount || 0
-        });
-      } else {
-        setCookieStatus({
-          hasCookies: false,
-          message: 'Error checking cookie status',
-          lastUpdated: null,
-          cookieCount: 0
-        });
-      }
-    } catch (err) {
+      setCookieStatus({
+        hasCookies: data.hasCookies,
+        message: data.message,
+        lastUpdated: data.lastUpdated,
+        cookieName: data.cookieName,
+        cookieCount: data.cookieCount || 0
+      });
+    } catch (err: any) {
       console.error('Error checking cookie status:', err);
+      
+      let errorMessage = 'Failed to connect to server';
+      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+        errorMessage = 'Request timed out. Backend might be slow or down.';
+      } else if (err.message) {
+        errorMessage = err.message;
+      }
+      
       setCookieStatus({
         hasCookies: false,
-        message: 'Failed to connect to server',
+        message: errorMessage,
         lastUpdated: null,
         cookieCount: 0
       });
@@ -126,14 +164,26 @@ export default function DashboardPage() {
   };
 
   const handleAnalyze = async (request: AnalysisRequest) => {
+    // Reset states
+    setError(null);
+    setErrorDetails(null);
+    setResult(null);
+    
+    // Validate cookies
     if (!cookieStatus?.hasCookies) {
-      setError('No active LinkedIn cookies found in database. Please add li_at cookies to the linkedin_profile_data table.');
+      setError('No active LinkedIn cookies found in database.');
+      setErrorDetails('Please add a valid li_at cookie to the linkedin_profile_data table in Supabase.');
+      return;
+    }
+
+    // Validate URL
+    if (!request.url.includes('linkedin.com')) {
+      setError('Invalid LinkedIn URL');
+      setErrorDetails('Please enter a valid LinkedIn profile or post URL.');
       return;
     }
 
     setIsLoading(true);
-    setError(null);
-    setResult(null);
     
     setAnalysisProgress({
       message: 'Initializing browser...',
@@ -142,6 +192,11 @@ export default function DashboardPage() {
       currentUrl: request.url,
       browserVisible: false
     });
+
+    // Create abort controller for timeout
+    const controller = new AbortController();
+    // Render free tier times out at 60 seconds, so set timeout to 55 seconds
+    const timeoutId = setTimeout(() => controller.abort(), 55000);
 
     try {
       console.log('Starting analysis with request:', request);
@@ -154,27 +209,88 @@ export default function DashboardPage() {
         format: request.format || 'json'
       };
 
+      // Clean up undefined values
       Object.keys(requestBody).forEach(key => {
         if (requestBody[key] === undefined) {
           delete requestBody[key];
         }
       });
 
+      console.log('Sending request to backend...');
+      
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
+        signal: controller.signal
       });
 
-      const data = await response.json();
-      console.log('Analysis response:', data);
+      clearTimeout(timeoutId);
+      console.log('Response received, status:', response.status);
 
+      // Handle non-200 responses
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to analyze');
+        const errorText = await response.text();
+        console.error('Server error response:', errorText);
+        
+        let errorMessage = `Server returned ${response.status}`;
+        let errorDetail = '';
+        
+        if (!errorText) {
+          errorMessage = 'Server returned empty response';
+          errorDetail = 'The backend might have timed out (Render free tier limit is 60 seconds). Try with fewer profiles (maxLikes: 5-10).';
+        } else {
+          try {
+            // Try to parse as JSON
+            const errorJson = JSON.parse(errorText);
+            errorMessage = errorJson.error || errorMessage;
+            errorDetail = errorJson.details || '';
+          } catch {
+            // If not JSON, use the text
+            errorMessage = errorText.substring(0, 200);
+          }
+        }
+        
+        throw { message: errorMessage, details: errorDetail };
       }
 
+      // Get response as text first to debug empty responses
+      const responseText = await response.text();
+      console.log('Raw response length:', responseText.length);
+      
+      if (!responseText || responseText.trim() === '') {
+        throw { 
+          message: 'Server returned empty response', 
+          details: 'The backend might have timed out (Render free tier limit is 60 seconds). Try with fewer profiles (maxLikes: 5-10) or upgrade your Render plan.'
+        };
+      }
+
+      // Try to parse as JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Failed to parse JSON. First 200 chars:', responseText.substring(0, 200));
+        
+        // Check if it's HTML (error page)
+        if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
+          throw { 
+            message: 'Server returned an HTML error page', 
+            details: 'The backend might be down or restarting. Please try again in a few minutes.'
+          };
+        } else {
+          throw { 
+            message: 'Server returned invalid JSON', 
+            details: `The response started with: ${responseText.substring(0, 100)}`
+          };
+        }
+      }
+
+      console.log('Analysis response:', data);
+
+      // Progress steps animation
       const steps = [
         { message: 'Initializing browser...', step: 1 },
         { message: 'Logging into LinkedIn...', step: 2 },
@@ -201,14 +317,16 @@ export default function DashboardPage() {
         }
       }, 5000);
 
+      // Handle successful response
       if (data.success) {
         setResult(data);
         await storeScrapedData(data, request.url);
         loadAnalysisHistory();
       } else {
-        throw new Error(data.error || 'Analysis failed');
+        throw { message: data.error || 'Analysis failed', details: '' };
       }
 
+      // Clear progress after delay
       setTimeout(() => {
         clearInterval(progressInterval);
         setAnalysisProgress({
@@ -221,8 +339,25 @@ export default function DashboardPage() {
       }, 35000);
 
     } catch (err: any) {
+      clearTimeout(timeoutId);
       console.error('Analysis error:', err);
-      setError(err.message || 'An error occurred during analysis');
+      
+      // Handle different error types
+      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
+        setError('Request timed out');
+        setErrorDetails('Render free tier limits requests to 60 seconds. Try with fewer profiles (maxLikes: 5-10) or upgrade your Render plan.');
+      } else if (err.message === 'Failed to fetch') {
+        setError('Cannot connect to backend');
+        setErrorDetails('Please check if the Render backend is running and accessible.');
+      } else if (err.message && err.details) {
+        setError(err.message);
+        setErrorDetails(err.details);
+      } else if (err.message) {
+        setError(err.message);
+      } else {
+        setError('An unexpected error occurred');
+        setErrorDetails('Please try again or check the console for details.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -353,6 +488,7 @@ export default function DashboardPage() {
               <button 
                 onClick={checkCookieStatus}
                 className="flex items-center space-x-2 text-sm text-gray-600 hover:text-blue-600 transition-colors p-2 rounded-lg hover:bg-blue-50"
+                title="Refresh cookie status"
               >
                 <RefreshCw className={`h-4 w-4 ${isCheckingCookies ? 'animate-spin' : ''}`} />
                 <span className="hidden md:inline">Refresh</span>
@@ -480,19 +616,45 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  <div className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1 ${
                     cookieStatus?.hasCookies 
                       ? 'bg-green-100 text-green-800' 
                       : 'bg-amber-100 text-amber-800'
                   }`}>
+                    <Database className="h-3 w-3" />
                     {cookieStatus?.hasCookies ? 'Cookies Active' : 'No Cookies'}
                   </div>
-                  <div className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                  <div className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium flex items-center gap-1">
+                    <User className="h-3 w-3" />
                     Free Plan
                   </div>
                 </div>
               </div>
             </div>
+
+            {/* API Status Warning */}
+            {apiStatus && !apiStatus.available && (
+              <div className="mb-8 bg-red-50 border border-red-200 rounded-xl p-4">
+                <div className="flex items-start space-x-3">
+                  <Server className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-sm font-medium text-red-800">
+                      ⚠️ API Connection Issue
+                    </p>
+                    <p className="text-sm text-red-700 mt-1">
+                      {apiStatus.message}. The backend might be down or restarting.
+                    </p>
+                    <button 
+                      onClick={checkApiStatus}
+                      className="mt-2 text-sm text-red-600 hover:text-red-800 flex items-center gap-1"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      Retry Connection
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Cookie Status */}
             <div className="mb-8">
@@ -522,7 +684,7 @@ export default function DashboardPage() {
                         <h3 className={`text-lg font-semibold ${
                           cookieStatus.hasCookies ? 'text-green-800' : 'text-amber-800'
                         }`}>
-                          {cookieStatus.message}
+                          {cookieStatus.hasCookies ? 'LinkedIn Cookies Active' : 'No Active Cookies'}
                         </h3>
                         <Link 
                           href="/cookies" 
@@ -532,33 +694,39 @@ export default function DashboardPage() {
                           <span>Manage</span>
                         </Link>
                       </div>
+                      <p className={`text-sm mt-1 ${
+                        cookieStatus.hasCookies ? 'text-green-700' : 'text-amber-700'
+                      }`}>
+                        {cookieStatus.message}
+                      </p>
                       <div className="mt-4 grid grid-cols-2 gap-4">
                         {cookieStatus.lastUpdated && (
                           <div>
-                            <p className="text-sm text-gray-500">Last Used</p>
+                            <p className="text-xs text-gray-500">Last Used</p>
                             <p className="text-sm font-medium text-gray-900">
                               {new Date(cookieStatus.lastUpdated).toLocaleDateString()}
                             </p>
                           </div>
                         )}
-                        {cookieStatus.cookieCount && (
+                        {cookieStatus.cookieCount !== undefined && (
                           <div>
-                            <p className="text-sm text-gray-500">Active Cookies</p>
+                            <p className="text-xs text-gray-500">Active Cookies</p>
                             <p className="text-sm font-medium text-gray-900">
-                              {cookieStatus.cookieCount} cookies
+                              {cookieStatus.cookieCount} cookie{cookieStatus.cookieCount !== 1 ? 's' : ''}
                             </p>
                           </div>
                         )}
                       </div>
                       {!cookieStatus.hasCookies && (
                         <div className="mt-4 p-4 bg-white rounded-lg border border-gray-200">
-                          <p className="text-sm text-amber-700 mb-2">
-                            To add LinkedIn cookies to the database:
+                          <p className="text-sm text-amber-700 mb-2 font-medium">
+                            How to add LinkedIn cookies:
                           </p>
                           <ol className="text-sm text-gray-600 space-y-1 list-decimal pl-4">
-                            <li>Login to LinkedIn in Chrome</li>
-                            <li>Get your "li_at" cookie from DevTools</li>
-                            <li>Add it to the Cookies page</li>
+                            <li>Log in to LinkedIn in Chrome</li>
+                            <li>Open DevTools (F12) → Application → Cookies</li>
+                            <li>Copy the "li_at" cookie value</li>
+                            <li>Go to the <Link href="/cookies" className="text-blue-600 hover:underline">Cookies page</Link> and add it</li>
                           </ol>
                         </div>
                       )}
@@ -576,8 +744,9 @@ export default function DashboardPage() {
                     <Globe className="h-6 w-6 text-white" />
                     <h2 className="text-2xl font-bold text-white">Start New Analysis</h2>
                   </div>
-                  <div className="text-sm text-blue-100">
-                    Using authenticated browser
+                  <div className="text-sm text-blue-100 flex items-center gap-1">
+                    <Clock className="h-4 w-4" />
+                    {cookieStatus?.hasCookies ? 'Authenticated' : 'Login Required'}
                   </div>
                 </div>
                 <p className="text-blue-100 mt-2">
@@ -661,13 +830,21 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold text-red-800 mb-2">Analysis Error</h3>
-                    <p className="text-red-700 mb-4">{error}</p>
+                    <p className="text-red-700 mb-2">{error}</p>
+                    {errorDetails && (
+                      <div className="bg-red-100/50 p-3 rounded-lg mb-4">
+                        <p className="text-sm text-red-600">{errorDetails}</p>
+                      </div>
+                    )}
                     <div className="flex space-x-3">
                       <button
-                        onClick={() => setError(null)}
+                        onClick={() => {
+                          setError(null);
+                          setErrorDetails(null);
+                        }}
                         className="px-4 py-2 bg-gradient-to-r from-red-600 to-pink-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all duration-300"
                       >
-                        Try Again
+                        Dismiss
                       </button>
                       <button
                         onClick={checkCookieStatus}
@@ -835,6 +1012,7 @@ export default function DashboardPage() {
                 <button 
                   onClick={loadAnalysisHistory}
                   className="p-1 hover:bg-gray-100 rounded-md transition-colors"
+                  title="Refresh history"
                 >
                   <RefreshCw className="h-4 w-4 text-gray-600" />
                 </button>
@@ -875,6 +1053,7 @@ export default function DashboardPage() {
                         <Link 
                           href={`/results/${analysis.id}`}
                           className="text-blue-600 hover:text-blue-800 flex items-center space-x-1"
+                          prefetch={false}
                         >
                           <ExternalLink className="h-3 w-3" />
                           <span>View</span>
