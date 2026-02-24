@@ -7,7 +7,6 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "postinstall": "npx puppeteer browsers install chrome",
     "render-build": "npm install && puppeteer browsers install chrome && npm run build",
     "build:worker": "tsc --project tsconfig.worker.json",
     "start:worker": "node dist/worker.js",
