@@ -20,6 +20,12 @@ import {
 } from 'lucide-react';
 import { signOut, getCurrentUser } from '@/lib/supabase';
 
+// ==========================================================================
+// ✅ YOUR VPS API BASE URL - UPDATE THIS WITH YOUR ACTUAL VPS IP
+// ==========================================================================
+const API_BASE_URL = 'http://[2a02:4780:4:c766::1]:3000'; // Your IPv6 address
+// OR use IPv4 if you have it: const API_BASE_URL = 'http://45.123.45.67:3000';
+
 export default function DashboardPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -50,7 +56,7 @@ export default function DashboardPage() {
   // Check if API is reachable
   const checkApiStatus = async () => {
     try {
-      const response = await fetch('/api/cookie-status', { 
+      const response = await fetch(`${API_BASE_URL}/api/cookie-status`, { 
         method: 'GET',
         signal: AbortSignal.timeout(5000) // 5 second timeout
       });
@@ -86,7 +92,7 @@ export default function DashboardPage() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-      const response = await fetch('/api/cookie-status', {
+      const response = await fetch(`${API_BASE_URL}/api/cookie-status`, {
         signal: controller.signal
       });
       
@@ -128,7 +134,7 @@ export default function DashboardPage() {
 
   const loadAnalysisHistory = async () => {
     try {
-      const response = await fetch('/api/analyses/recent');
+      const response = await fetch(`${API_BASE_URL}/api/analyses/recent`);
       if (response.ok) {
         const data = await response.json();
         setAnalysisHistory(data);
@@ -140,7 +146,7 @@ export default function DashboardPage() {
 
   const storeScrapedData = async (result: ScrapeResult, profileUrl: string) => {
     try {
-      const response = await fetch('/api/analyses/store', {
+      const response = await fetch(`${API_BASE_URL}/api/analyses/store`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -195,8 +201,8 @@ export default function DashboardPage() {
 
     // Create abort controller for timeout
     const controller = new AbortController();
-    // Render free tier times out at 60 seconds, so set timeout to 55 seconds
-    const timeoutId = setTimeout(() => controller.abort(), 55000);
+    // VPS has no timeout limit, but we'll keep a generous timeout
+    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
 
     try {
       console.log('Starting analysis with request:', request);
@@ -216,9 +222,9 @@ export default function DashboardPage() {
         }
       });
 
-      console.log('Sending request to backend...');
+      console.log('Sending request to VPS backend...');
       
-      const response = await fetch('/api/analyze', {
+      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -240,7 +246,7 @@ export default function DashboardPage() {
         
         if (!errorText) {
           errorMessage = 'Server returned empty response';
-          errorDetail = 'The backend might have timed out (Render free tier limit is 60 seconds). Try with fewer profiles (maxLikes: 5-10).';
+          errorDetail = 'The backend might be down or restarting.';
         } else {
           try {
             // Try to parse as JSON
@@ -263,7 +269,7 @@ export default function DashboardPage() {
       if (!responseText || responseText.trim() === '') {
         throw { 
           message: 'Server returned empty response', 
-          details: 'The backend might have timed out (Render free tier limit is 60 seconds). Try with fewer profiles (maxLikes: 5-10) or upgrade your Render plan.'
+          details: 'The backend might be down or restarting.'
         };
       }
 
@@ -345,10 +351,10 @@ export default function DashboardPage() {
       // Handle different error types
       if (err.name === 'AbortError' || err.name === 'TimeoutError') {
         setError('Request timed out');
-        setErrorDetails('Render free tier limits requests to 60 seconds. Try with fewer profiles (maxLikes: 5-10) or upgrade your Render plan.');
+        setErrorDetails('The request took too long. Try with fewer profiles (maxLikes: 5-10).');
       } else if (err.message === 'Failed to fetch') {
-        setError('Cannot connect to backend');
-        setErrorDetails('Please check if the Render backend is running and accessible.');
+        setError('Cannot connect to VPS backend');
+        setErrorDetails('Please check if your VPS is running and the API is accessible.');
       } else if (err.message && err.details) {
         setError(err.message);
         setErrorDetails(err.details);
@@ -639,10 +645,10 @@ export default function DashboardPage() {
                   <Server className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="text-sm font-medium text-red-800">
-                      ⚠️ API Connection Issue
+                      ⚠️ VPS Connection Issue
                     </p>
                     <p className="text-sm text-red-700 mt-1">
-                      {apiStatus.message}. The backend might be down or restarting.
+                      {apiStatus.message}. Your VPS backend might be down.
                     </p>
                     <button 
                       onClick={checkApiStatus}
@@ -771,7 +777,7 @@ export default function DashboardPage() {
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">Analysis in Progress</h3>
                   <p className="text-gray-600 mb-1">Analyzing: {analysisProgress.currentUrl}</p>
-                  <p className="text-sm text-gray-500">Using database cookies for authentication</p>
+                  <p className="text-sm text-gray-500">Using VPS backend for processing</p>
                 </div>
 
                 <div className="space-y-4">
@@ -810,7 +816,7 @@ export default function DashboardPage() {
                       <div className="flex items-center space-x-2">
                         <AlertCircle className="h-5 w-5 text-amber-600" />
                         <p className="text-sm text-amber-700">
-                          A Chrome browser window has opened. Please keep it visible and do not close it during analysis.
+                          A Chrome browser window has opened on the VPS. Please wait while scraping completes.
                         </p>
                       </div>
                     </div>
@@ -1098,7 +1104,7 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">Check Cookie Status</p>
-                    <p className="text-xs text-gray-500">Verify database connection</p>
+                    <p className="text-xs text-gray-500">Verify VPS connection</p>
                   </div>
                 </button>
                 
@@ -1140,7 +1146,7 @@ export default function DashboardPage() {
                   LinkedIn Analyzer
                 </span>
               </div>
-              <p className="text-gray-600 text-sm mt-2">Professional LinkedIn Analytics</p>
+              <p className="text-gray-600 text-sm mt-2">Powered by VPS Backend</p>
             </div>
             <div className="flex space-x-6">
               <Link href="/" className="text-gray-600 hover:text-blue-600 transition-colors text-sm">
