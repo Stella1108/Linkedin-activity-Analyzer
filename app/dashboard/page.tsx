@@ -20,12 +20,6 @@ import {
 } from 'lucide-react';
 import { signOut, getCurrentUser } from '@/lib/supabase';
 
-// ==========================================================================
-// ✅ YOUR VPS API BASE URL - UPDATE THIS WITH YOUR ACTUAL VPS IP
-// ==========================================================================
-const API_BASE_URL = 'http://[2a02:4780:4:c766::1]:3000'; // Your IPv6 address
-// OR use IPv4 if you have it: const API_BASE_URL = 'http://45.123.45.67:3000';
-
 export default function DashboardPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -45,6 +39,7 @@ export default function DashboardPage() {
     browserVisible: false
   });
   const [apiStatus, setApiStatus] = useState<{available: boolean; message: string} | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   useEffect(() => {
     checkAuth();
@@ -53,10 +48,29 @@ export default function DashboardPage() {
     checkApiStatus();
   }, []);
 
+  // Poll for job status if there's an active job
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    
+    if (activeJobId && isLoading) {
+      interval = setInterval(async () => {
+        const jobResult = await checkJobStatus(activeJobId);
+        if (jobResult) {
+          clearInterval(interval);
+          setActiveJobId(null);
+        }
+      }, 3000); // Check every 3 seconds
+    }
+    
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [activeJobId, isLoading]);
+
   // Check if API is reachable
   const checkApiStatus = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/cookie-status`, { 
+      const response = await fetch('/api/analyze', { 
         method: 'GET',
         signal: AbortSignal.timeout(5000) // 5 second timeout
       });
@@ -90,9 +104,9 @@ export default function DashboardPage() {
     
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch(`${API_BASE_URL}/api/cookie-status`, {
+      const response = await fetch('/api/cookie-status', {
         signal: controller.signal
       });
       
@@ -109,7 +123,7 @@ export default function DashboardPage() {
         message: data.message,
         lastUpdated: data.lastUpdated,
         cookieName: data.cookieName,
-        cookieCount: data.cookieCount || 0
+        cookieCount: data.cookieCount || 1
       });
     } catch (err: any) {
       console.error('Error checking cookie status:', err);
@@ -134,39 +148,99 @@ export default function DashboardPage() {
 
   const loadAnalysisHistory = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/analyses/recent`);
+      // Try to get completed jobs from the queue
+      const response = await fetch('/api/analyze?status=completed');
       if (response.ok) {
         const data = await response.json();
-        setAnalysisHistory(data);
+        
+        // Transform the data to match AnalysisHistoryItem format
+        // The API might return an array of jobs or a single object
+        let jobs: any[] = [];
+        
+        if (Array.isArray(data)) {
+          jobs = data;
+        } else if (data.jobs && Array.isArray(data.jobs)) {
+          jobs = data.jobs;
+        } else if (data.id) {
+          jobs = [data];
+        }
+        
+        const history: AnalysisHistoryItem[] = jobs
+          .filter((job: any) => job.status === 'completed' || job.completed_at)
+          .map((job: any) => ({
+            id: job.id,
+            created_at: job.completed_at || job.created_at || new Date().toISOString(),
+            profile_url: job.profile_url || job.url || '',
+            profile_name: job.result?.data?.profile?.name || 
+                         job.profile_url?.split('/in/')[1]?.split('/')[0] || 
+                         job.url?.split('/in/')[1]?.split('/')[0] ||
+                         'Unknown Profile',
+            type: job.type || 'profile',
+            likes_count: job.result?.data?.likes?.length || 0,
+            comments_count: job.result?.data?.comments?.length || 0,
+            success: job.status === 'completed'
+          }))
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 10);
+        
+        setAnalysisHistory(history);
+      } else {
+        // If no completed jobs, set empty array
+        setAnalysisHistory([]);
       }
     } catch (err) {
       console.error('Error loading analysis history:', err);
+      setAnalysisHistory([]);
     }
   };
 
-  const storeScrapedData = async (result: ScrapeResult, profileUrl: string) => {
+  const checkJobStatus = async (jobId: string) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/analyses/store`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          profile_url: profileUrl,
-          result: result,
-          user_id: currentUser?.id
-        }),
-      });
+      const response = await fetch(`/api/analyze?jobId=${jobId}`);
       
       if (response.ok) {
-        console.log('✅ Scraped data stored in database');
-        loadAnalysisHistory();
-      } else {
-        console.error('Failed to store scraped data');
+        const data = await response.json();
+        
+        // Update progress based on job status
+        if (data.status === 'processing') {
+          setAnalysisProgress(prev => ({
+            ...prev,
+            message: 'Processing job...',
+            step: 3
+          }));
+        } else if (data.status === 'completed') {
+          // Job completed successfully
+          if (data.result) {
+            setResult(data.result);
+            setIsLoading(false);
+            loadAnalysisHistory(); // Refresh history
+            setAnalysisProgress({
+              message: '',
+              step: 0,
+              totalSteps: 7,
+              currentUrl: '',
+              browserVisible: false
+            });
+          }
+          return data.result;
+        } else if (data.status === 'failed') {
+          setError(data.error || 'Job failed');
+          setErrorDetails(data.error_details || '');
+          setIsLoading(false);
+          setAnalysisProgress({
+            message: '',
+            step: 0,
+            totalSteps: 7,
+            currentUrl: '',
+            browserVisible: false
+          });
+          return null;
+        }
       }
     } catch (err) {
-      console.error('Error storing scraped data:', err);
+      console.error('Error checking job status:', err);
     }
+    return null;
   };
 
   const handleAnalyze = async (request: AnalysisRequest) => {
@@ -192,7 +266,7 @@ export default function DashboardPage() {
     setIsLoading(true);
     
     setAnalysisProgress({
-      message: 'Initializing browser...',
+      message: 'Queuing job...',
       step: 1,
       totalSteps: 7,
       currentUrl: request.url,
@@ -201,30 +275,20 @@ export default function DashboardPage() {
 
     // Create abort controller for timeout
     const controller = new AbortController();
-    // VPS has no timeout limit, but we'll keep a generous timeout
-    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minute timeout
+    const timeoutId = setTimeout(() => controller.abort(), 55000);
 
     try {
       console.log('Starting analysis with request:', request);
       
       const requestBody: any = {
         url: request.url,
-        type: request.type || 'auto',
         maxLikes: request.maxLikes || 20,
-        keepOpen: request.keepOpen || false,
         format: request.format || 'json'
       };
 
-      // Clean up undefined values
-      Object.keys(requestBody).forEach(key => {
-        if (requestBody[key] === undefined) {
-          delete requestBody[key];
-        }
-      });
-
-      console.log('Sending request to VPS backend...');
+      console.log('Sending request to backend...');
       
-      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+      const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -244,97 +308,63 @@ export default function DashboardPage() {
         let errorMessage = `Server returned ${response.status}`;
         let errorDetail = '';
         
-        if (!errorText) {
-          errorMessage = 'Server returned empty response';
-          errorDetail = 'The backend might be down or restarting.';
-        } else {
-          try {
-            // Try to parse as JSON
-            const errorJson = JSON.parse(errorText);
-            errorMessage = errorJson.error || errorMessage;
-            errorDetail = errorJson.details || '';
-          } catch {
-            // If not JSON, use the text
-            errorMessage = errorText.substring(0, 200);
-          }
+        try {
+          // Try to parse as JSON
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorMessage;
+          errorDetail = errorJson.details || '';
+        } catch {
+          // If not JSON, use the text
+          errorMessage = errorText.substring(0, 200);
         }
         
         throw { message: errorMessage, details: errorDetail };
       }
 
-      // Get response as text first to debug empty responses
-      const responseText = await response.text();
-      console.log('Raw response length:', responseText.length);
-      
-      if (!responseText || responseText.trim() === '') {
-        throw { 
-          message: 'Server returned empty response', 
-          details: 'The backend might be down or restarting.'
-        };
-      }
-
-      // Try to parse as JSON
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('Failed to parse JSON. First 200 chars:', responseText.substring(0, 200));
-        
-        // Check if it's HTML (error page)
-        if (responseText.trim().startsWith('<!DOCTYPE') || responseText.trim().startsWith('<html')) {
-          throw { 
-            message: 'Server returned an HTML error page', 
-            details: 'The backend might be down or restarting. Please try again in a few minutes.'
-          };
-        } else {
-          throw { 
-            message: 'Server returned invalid JSON', 
-            details: `The response started with: ${responseText.substring(0, 100)}`
-          };
-        }
-      }
-
+      // Parse response
+      const data = await response.json();
       console.log('Analysis response:', data);
 
-      // Progress steps animation
-      const steps = [
-        { message: 'Initializing browser...', step: 1 },
-        { message: 'Logging into LinkedIn...', step: 2 },
-        { message: 'Navigating to profile...', step: 3, browserVisible: true },
-        { message: 'Loading page content...', step: 4 },
-        { message: 'Extracting data...', step: 5 },
-        { message: 'Processing results...', step: 6 },
-        { message: 'Finalizing analysis...', step: 7 }
-      ];
-      
-      let currentStep = 0;
-      const progressInterval = setInterval(() => {
-        if (currentStep < steps.length) {
-          const step = steps[currentStep];
-          setAnalysisProgress(prev => ({
-            ...prev,
-            message: step.message || '',
-            step: step.step || 0,
-            browserVisible: step.browserVisible || false
-          }));
-          currentStep++;
-        } else {
+      // Handle queued job response
+      if (data.jobId) {
+        setActiveJobId(data.jobId);
+        
+        // Start progress animation
+        const steps = [
+          { message: 'Job queued...', step: 1 },
+          { message: 'Worker picking up job...', step: 2 },
+          { message: 'Initializing browser...', step: 3 },
+          { message: 'Logging into LinkedIn...', step: 4 },
+          { message: 'Navigating to profile...', step: 5 },
+          { message: 'Extracting data...', step: 6 },
+          { message: 'Processing results...', step: 7 }
+        ];
+        
+        let currentStep = 0;
+        const progressInterval = setInterval(() => {
+          if (currentStep < steps.length) {
+            const step = steps[currentStep];
+            setAnalysisProgress(prev => ({
+              ...prev,
+              message: step.message || '',
+              step: step.step || 0,
+              browserVisible: step.step >= 3 // Browser visible from step 3 onwards
+            }));
+            currentStep++;
+          } else {
+            clearInterval(progressInterval);
+          }
+        }, 8000); // Slower progress for queue
+
+        // Clear progress after 60 seconds if still loading
+        setTimeout(() => {
           clearInterval(progressInterval);
-        }
-      }, 5000);
-
-      // Handle successful response
-      if (data.success) {
+        }, 60000);
+      } else if (data.success) {
+        // Direct response (not queued)
         setResult(data);
-        await storeScrapedData(data, request.url);
+        setIsLoading(false);
         loadAnalysisHistory();
-      } else {
-        throw { message: data.error || 'Analysis failed', details: '' };
-      }
-
-      // Clear progress after delay
-      setTimeout(() => {
-        clearInterval(progressInterval);
         setAnalysisProgress({
           message: '',
           step: 0,
@@ -342,7 +372,9 @@ export default function DashboardPage() {
           currentUrl: '',
           browserVisible: false
         });
-      }, 35000);
+      } else {
+        throw { message: data.error || 'Analysis failed', details: '' };
+      }
 
     } catch (err: any) {
       clearTimeout(timeoutId);
@@ -351,10 +383,10 @@ export default function DashboardPage() {
       // Handle different error types
       if (err.name === 'AbortError' || err.name === 'TimeoutError') {
         setError('Request timed out');
-        setErrorDetails('The request took too long. Try with fewer profiles (maxLikes: 5-10).');
+        setErrorDetails('The request took too long. This could be because the backend is busy. Please try again.');
       } else if (err.message === 'Failed to fetch') {
-        setError('Cannot connect to VPS backend');
-        setErrorDetails('Please check if your VPS is running and the API is accessible.');
+        setError('Cannot connect to backend');
+        setErrorDetails('Please check if the backend server is running and accessible.');
       } else if (err.message && err.details) {
         setError(err.message);
         setErrorDetails(err.details);
@@ -364,30 +396,54 @@ export default function DashboardPage() {
         setError('An unexpected error occurred');
         setErrorDetails('Please try again or check the console for details.');
       }
-    } finally {
+      
       setIsLoading(false);
+      setActiveJobId(null);
+      setAnalysisProgress({
+        message: '',
+        step: 0,
+        totalSteps: 7,
+        currentUrl: '',
+        browserVisible: false
+      });
     }
   };
 
-  // ✅ FIXED: Robust sign out function
+  // Cancel ongoing job
+  const cancelJob = async () => {
+    if (activeJobId) {
+      try {
+        await fetch(`/api/analyze?jobId=${activeJobId}`, {
+          method: 'DELETE'
+        });
+      } catch (err) {
+        console.error('Error cancelling job:', err);
+      }
+    }
+    
+    setIsLoading(false);
+    setActiveJobId(null);
+    setAnalysisProgress({
+      message: '',
+      step: 0,
+      totalSteps: 7,
+      currentUrl: '',
+      browserVisible: false
+    });
+  };
+
   const handleSignOut = async () => {
     try {
-      // Attempt to sign out from Supabase
       const { error } = await signOut();
       if (error) {
         console.error('Sign out error:', error);
-        // Still proceed with redirect
       }
       
-      // Clear any client-side storage (optional)
       localStorage.removeItem('supabase.auth.token');
       sessionStorage.clear();
-      
-      // Hard redirect to login page
       window.location.href = '/auth/login';
     } catch (err) {
       console.error('Unexpected sign out error:', err);
-      // Fallback redirect
       window.location.href = '/auth/login';
     }
   };
@@ -645,10 +701,10 @@ export default function DashboardPage() {
                   <Server className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                   <div>
                     <p className="text-sm font-medium text-red-800">
-                      ⚠️ VPS Connection Issue
+                      ⚠️ API Connection Issue
                     </p>
                     <p className="text-sm text-red-700 mt-1">
-                      {apiStatus.message}. Your VPS backend might be down.
+                      {apiStatus.message}. The backend might be down or restarting.
                     </p>
                     <button 
                       onClick={checkApiStatus}
@@ -776,8 +832,8 @@ export default function DashboardPage() {
                     <BarChart3 className="h-10 w-10 text-blue-600 animate-pulse" />
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">Analysis in Progress</h3>
-                  <p className="text-gray-600 mb-1">Analyzing: {analysisProgress.currentUrl}</p>
-                  <p className="text-sm text-gray-500">Using VPS backend for processing</p>
+                  <p className="text-gray-600 mb-1">Job ID: {activeJobId || 'Processing...'}</p>
+                  <p className="text-sm text-gray-500">Using queue system for background processing</p>
                 </div>
 
                 <div className="space-y-4">
@@ -795,15 +851,15 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">1</div>
-                      <p className="text-sm text-gray-600 mt-1">Browser Opens</p>
+                      <p className="text-sm text-gray-600 mt-1">Queue Job</p>
                     </div>
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">2</div>
-                      <p className="text-sm text-gray-600 mt-1">LinkedIn Login</p>
+                      <p className="text-sm text-gray-600 mt-1">Worker Start</p>
                     </div>
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">3</div>
-                      <p className="text-sm text-gray-600 mt-1">Navigate</p>
+                      <p className="text-sm text-gray-600 mt-1">Browser Open</p>
                     </div>
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">4</div>
@@ -811,16 +867,14 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {analysisProgress.browserVisible && (
-                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
-                      <div className="flex items-center space-x-2">
-                        <AlertCircle className="h-5 w-5 text-amber-600" />
-                        <p className="text-sm text-amber-700">
-                          A Chrome browser window has opened on the VPS. Please wait while scraping completes.
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                  <div className="mt-4 flex justify-center">
+                    <button
+                      onClick={cancelJob}
+                      className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
+                    >
+                      Cancel Job
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1104,7 +1158,7 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">Check Cookie Status</p>
-                    <p className="text-xs text-gray-500">Verify VPS connection</p>
+                    <p className="text-xs text-gray-500">Verify database connection</p>
                   </div>
                 </button>
                 
@@ -1146,7 +1200,7 @@ export default function DashboardPage() {
                   LinkedIn Analyzer
                 </span>
               </div>
-              <p className="text-gray-600 text-sm mt-2">Powered by VPS Backend</p>
+              <p className="text-gray-600 text-sm mt-2">Professional LinkedIn Analytics</p>
             </div>
             <div className="flex space-x-6">
               <Link href="/" className="text-gray-600 hover:text-blue-600 transition-colors text-sm">
