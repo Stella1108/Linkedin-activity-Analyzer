@@ -6,11 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
-    "render-build": "npm install && puppeteer browsers install chrome && npm run build",
-    "build:worker": "tsc --project tsconfig.worker.json",
-    "start:worker": "node dist/worker.js",
-    "dev:worker": "tsx watch worker.ts"
+    "lint": "next lint"
+    
   },
   "dependencies": {
     "@supabase/ssr": "^0.1.0",

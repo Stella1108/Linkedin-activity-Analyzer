@@ -16,7 +16,7 @@ import {
 import { 
   BarChart3, Users, MessageSquare, Globe, Database, CheckCircle, 
   AlertCircle, RefreshCw, LogOut, User, Settings, X, Menu, 
-  Download, ExternalLink, History, Cookie, FileText, Clock, Server
+  Download, ExternalLink, History, Cookie, FileText 
 } from 'lucide-react';
 import { signOut, getCurrentUser } from '@/lib/supabase';
 
@@ -25,7 +25,6 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<ScrapeResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [cookieStatus, setCookieStatus] = useState<CookieStatus | null>(null);
   const [isCheckingCookies, setIsCheckingCookies] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -38,56 +37,12 @@ export default function DashboardPage() {
     currentUrl: '',
     browserVisible: false
   });
-  const [apiStatus, setApiStatus] = useState<{available: boolean; message: string} | null>(null);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   useEffect(() => {
     checkAuth();
     checkCookieStatus();
     loadAnalysisHistory();
-    checkApiStatus();
   }, []);
-
-  // Poll for job status if there's an active job
-  useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
-    if (activeJobId && isLoading) {
-      interval = setInterval(async () => {
-        const jobResult = await checkJobStatus(activeJobId);
-        if (jobResult) {
-          clearInterval(interval);
-          setActiveJobId(null);
-        }
-      }, 3000); // Check every 3 seconds
-    }
-    
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [activeJobId, isLoading]);
-
-  // Check if API is reachable
-  const checkApiStatus = async () => {
-    try {
-      const response = await fetch('/api/analyze', { 
-        method: 'GET',
-        signal: AbortSignal.timeout(5000) // 5 second timeout
-      });
-      
-      if (response.ok) {
-        setApiStatus({ available: true, message: 'API is connected' });
-      } else {
-        setApiStatus({ available: false, message: `API returned status ${response.status}` });
-      }
-    } catch (err) {
-      console.error('API status check failed:', err);
-      setApiStatus({ 
-        available: false, 
-        message: 'Cannot connect to API. Backend might be down.' 
-      });
-    }
-  };
 
   const checkAuth = async () => {
     const { user, error } = await getCurrentUser();
@@ -100,44 +55,31 @@ export default function DashboardPage() {
 
   const checkCookieStatus = async () => {
     setIsCheckingCookies(true);
-    setError(null);
-    
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
-
-      const response = await fetch('/api/cookie-status', {
-        signal: controller.signal
-      });
-      
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-      
+      const response = await fetch('/api/cookie-status');
       const data = await response.json();
       
-      setCookieStatus({
-        hasCookies: data.hasCookies,
-        message: data.message,
-        lastUpdated: data.lastUpdated,
-        cookieName: data.cookieName,
-        cookieCount: data.cookieCount || 1
-      });
-    } catch (err: any) {
-      console.error('Error checking cookie status:', err);
-      
-      let errorMessage = 'Failed to connect to server';
-      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
-        errorMessage = 'Request timed out. Backend might be slow or down.';
-      } else if (err.message) {
-        errorMessage = err.message;
+      if (response.ok) {
+        setCookieStatus({
+          hasCookies: data.hasCookies,
+          message: data.message,
+          lastUpdated: data.lastUpdated,
+          cookieName: data.cookieName,
+          cookieCount: data.cookieCount || 0
+        });
+      } else {
+        setCookieStatus({
+          hasCookies: false,
+          message: 'Error checking cookie status',
+          lastUpdated: null,
+          cookieCount: 0
+        });
       }
-      
+    } catch (err) {
+      console.error('Error checking cookie status:', err);
       setCookieStatus({
         hasCookies: false,
-        message: errorMessage,
+        message: 'Failed to connect to server',
         lastUpdated: null,
         cookieCount: 0
       });
@@ -148,223 +90,127 @@ export default function DashboardPage() {
 
   const loadAnalysisHistory = async () => {
     try {
-      // Try to get completed jobs from the queue
-      const response = await fetch('/api/analyze?status=completed');
+      const response = await fetch('/api/analyses/recent');
       if (response.ok) {
         const data = await response.json();
-        
-        // Transform the data to match AnalysisHistoryItem format
-        // The API might return an array of jobs or a single object
-        let jobs: any[] = [];
-        
-        if (Array.isArray(data)) {
-          jobs = data;
-        } else if (data.jobs && Array.isArray(data.jobs)) {
-          jobs = data.jobs;
-        } else if (data.id) {
-          jobs = [data];
-        }
-        
-        const history: AnalysisHistoryItem[] = jobs
-          .filter((job: any) => job.status === 'completed' || job.completed_at)
-          .map((job: any) => ({
-            id: job.id,
-            created_at: job.completed_at || job.created_at || new Date().toISOString(),
-            profile_url: job.profile_url || job.url || '',
-            profile_name: job.result?.data?.profile?.name || 
-                         job.profile_url?.split('/in/')[1]?.split('/')[0] || 
-                         job.url?.split('/in/')[1]?.split('/')[0] ||
-                         'Unknown Profile',
-            type: job.type || 'profile',
-            likes_count: job.result?.data?.likes?.length || 0,
-            comments_count: job.result?.data?.comments?.length || 0,
-            success: job.status === 'completed'
-          }))
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 10);
-        
-        setAnalysisHistory(history);
-      } else {
-        // If no completed jobs, set empty array
-        setAnalysisHistory([]);
+        setAnalysisHistory(data);
       }
     } catch (err) {
       console.error('Error loading analysis history:', err);
-      setAnalysisHistory([]);
     }
   };
 
-  const checkJobStatus = async (jobId: string) => {
+  const storeScrapedData = async (result: ScrapeResult, profileUrl: string) => {
     try {
-      const response = await fetch(`/api/analyze?jobId=${jobId}`);
+      const response = await fetch('/api/analyses/store', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          profile_url: profileUrl,
+          result: result,
+          user_id: currentUser?.id
+        }),
+      });
       
       if (response.ok) {
-        const data = await response.json();
-        
-        // Update progress based on job status
-        if (data.status === 'processing') {
-          setAnalysisProgress(prev => ({
-            ...prev,
-            message: 'Processing job...',
-            step: 3
-          }));
-        } else if (data.status === 'completed') {
-          // Job completed successfully
-          if (data.result) {
-            setResult(data.result);
-            setIsLoading(false);
-            loadAnalysisHistory(); // Refresh history
-            setAnalysisProgress({
-              message: '',
-              step: 0,
-              totalSteps: 7,
-              currentUrl: '',
-              browserVisible: false
-            });
-          }
-          return data.result;
-        } else if (data.status === 'failed') {
-          setError(data.error || 'Job failed');
-          setErrorDetails(data.error_details || '');
-          setIsLoading(false);
-          setAnalysisProgress({
-            message: '',
-            step: 0,
-            totalSteps: 7,
-            currentUrl: '',
-            browserVisible: false
-          });
-          return null;
-        }
+        console.log('✅ Scraped data stored in database');
+        loadAnalysisHistory();
+      } else {
+        console.error('Failed to store scraped data');
       }
     } catch (err) {
-      console.error('Error checking job status:', err);
+      console.error('Error storing scraped data:', err);
     }
-    return null;
   };
 
   const handleAnalyze = async (request: AnalysisRequest) => {
-    // Reset states
-    setError(null);
-    setErrorDetails(null);
-    setResult(null);
-    
-    // Validate cookies
     if (!cookieStatus?.hasCookies) {
-      setError('No active LinkedIn cookies found in database.');
-      setErrorDetails('Please add a valid li_at cookie to the linkedin_profile_data table in Supabase.');
-      return;
-    }
-
-    // Validate URL
-    if (!request.url.includes('linkedin.com')) {
-      setError('Invalid LinkedIn URL');
-      setErrorDetails('Please enter a valid LinkedIn profile or post URL.');
+      setError('No active LinkedIn cookies found in database. Please add li_at cookies to the linkedin_profile_data table.');
       return;
     }
 
     setIsLoading(true);
+    setError(null);
+    setResult(null);
     
     setAnalysisProgress({
-      message: 'Queuing job...',
+      message: 'Initializing browser...',
       step: 1,
       totalSteps: 7,
       currentUrl: request.url,
       browserVisible: false
     });
 
-    // Create abort controller for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 55000);
-
     try {
       console.log('Starting analysis with request:', request);
       
       const requestBody: any = {
         url: request.url,
+        type: request.type || 'auto',
         maxLikes: request.maxLikes || 20,
+        keepOpen: request.keepOpen || false,
         format: request.format || 'json'
       };
 
-      console.log('Sending request to backend...');
-      
+      Object.keys(requestBody).forEach(key => {
+        if (requestBody[key] === undefined) {
+          delete requestBody[key];
+        }
+      });
+
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(requestBody),
-        signal: controller.signal
       });
 
-      clearTimeout(timeoutId);
-      console.log('Response received, status:', response.status);
-
-      // Handle non-200 responses
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Server error response:', errorText);
-        
-        let errorMessage = `Server returned ${response.status}`;
-        let errorDetail = '';
-        
-        try {
-          // Try to parse as JSON
-          const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.error || errorMessage;
-          errorDetail = errorJson.details || '';
-        } catch {
-          // If not JSON, use the text
-          errorMessage = errorText.substring(0, 200);
-        }
-        
-        throw { message: errorMessage, details: errorDetail };
-      }
-
-      // Parse response
       const data = await response.json();
       console.log('Analysis response:', data);
 
-      // Handle queued job response
-      if (data.jobId) {
-        setActiveJobId(data.jobId);
-        
-        // Start progress animation
-        const steps = [
-          { message: 'Job queued...', step: 1 },
-          { message: 'Worker picking up job...', step: 2 },
-          { message: 'Initializing browser...', step: 3 },
-          { message: 'Logging into LinkedIn...', step: 4 },
-          { message: 'Navigating to profile...', step: 5 },
-          { message: 'Extracting data...', step: 6 },
-          { message: 'Processing results...', step: 7 }
-        ];
-        
-        let currentStep = 0;
-        const progressInterval = setInterval(() => {
-          if (currentStep < steps.length) {
-            const step = steps[currentStep];
-            setAnalysisProgress(prev => ({
-              ...prev,
-              message: step.message || '',
-              step: step.step || 0,
-              browserVisible: step.step >= 3 // Browser visible from step 3 onwards
-            }));
-            currentStep++;
-          } else {
-            clearInterval(progressInterval);
-          }
-        }, 8000); // Slower progress for queue
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to analyze');
+      }
 
-        // Clear progress after 60 seconds if still loading
-        setTimeout(() => {
+      const steps = [
+        { message: 'Initializing browser...', step: 1 },
+        { message: 'Logging into LinkedIn...', step: 2 },
+        { message: 'Navigating to profile...', step: 3, browserVisible: true },
+        { message: 'Loading page content...', step: 4 },
+        { message: 'Extracting data...', step: 5 },
+        { message: 'Processing results...', step: 6 },
+        { message: 'Finalizing analysis...', step: 7 }
+      ];
+      
+      let currentStep = 0;
+      const progressInterval = setInterval(() => {
+        if (currentStep < steps.length) {
+          const step = steps[currentStep];
+          setAnalysisProgress(prev => ({
+            ...prev,
+            message: step.message || '',
+            step: step.step || 0,
+            browserVisible: step.browserVisible || false
+          }));
+          currentStep++;
+        } else {
           clearInterval(progressInterval);
-        }, 60000);
-      } else if (data.success) {
-        // Direct response (not queued)
+        }
+      }, 5000);
+
+      if (data.success) {
         setResult(data);
-        setIsLoading(false);
+        await storeScrapedData(data, request.url);
         loadAnalysisHistory();
+      } else {
+        throw new Error(data.error || 'Analysis failed');
+      }
+
+      setTimeout(() => {
+        clearInterval(progressInterval);
         setAnalysisProgress({
           message: '',
           step: 0,
@@ -372,78 +218,35 @@ export default function DashboardPage() {
           currentUrl: '',
           browserVisible: false
         });
-      } else {
-        throw { message: data.error || 'Analysis failed', details: '' };
-      }
+      }, 35000);
 
     } catch (err: any) {
-      clearTimeout(timeoutId);
       console.error('Analysis error:', err);
-      
-      // Handle different error types
-      if (err.name === 'AbortError' || err.name === 'TimeoutError') {
-        setError('Request timed out');
-        setErrorDetails('The request took too long. This could be because the backend is busy. Please try again.');
-      } else if (err.message === 'Failed to fetch') {
-        setError('Cannot connect to backend');
-        setErrorDetails('Please check if the backend server is running and accessible.');
-      } else if (err.message && err.details) {
-        setError(err.message);
-        setErrorDetails(err.details);
-      } else if (err.message) {
-        setError(err.message);
-      } else {
-        setError('An unexpected error occurred');
-        setErrorDetails('Please try again or check the console for details.');
-      }
-      
+      setError(err.message || 'An error occurred during analysis');
+    } finally {
       setIsLoading(false);
-      setActiveJobId(null);
-      setAnalysisProgress({
-        message: '',
-        step: 0,
-        totalSteps: 7,
-        currentUrl: '',
-        browserVisible: false
-      });
     }
   };
 
-  // Cancel ongoing job
-  const cancelJob = async () => {
-    if (activeJobId) {
-      try {
-        await fetch(`/api/analyze?jobId=${activeJobId}`, {
-          method: 'DELETE'
-        });
-      } catch (err) {
-        console.error('Error cancelling job:', err);
-      }
-    }
-    
-    setIsLoading(false);
-    setActiveJobId(null);
-    setAnalysisProgress({
-      message: '',
-      step: 0,
-      totalSteps: 7,
-      currentUrl: '',
-      browserVisible: false
-    });
-  };
-
+  // ✅ FIXED: Robust sign out function
   const handleSignOut = async () => {
     try {
+      // Attempt to sign out from Supabase
       const { error } = await signOut();
       if (error) {
         console.error('Sign out error:', error);
+        // Still proceed with redirect
       }
       
+      // Clear any client-side storage (optional)
       localStorage.removeItem('supabase.auth.token');
       sessionStorage.clear();
+      
+      // Hard redirect to login page
       window.location.href = '/auth/login';
     } catch (err) {
       console.error('Unexpected sign out error:', err);
+      // Fallback redirect
       window.location.href = '/auth/login';
     }
   };
@@ -550,7 +353,6 @@ export default function DashboardPage() {
               <button 
                 onClick={checkCookieStatus}
                 className="flex items-center space-x-2 text-sm text-gray-600 hover:text-blue-600 transition-colors p-2 rounded-lg hover:bg-blue-50"
-                title="Refresh cookie status"
               >
                 <RefreshCw className={`h-4 w-4 ${isCheckingCookies ? 'animate-spin' : ''}`} />
                 <span className="hidden md:inline">Refresh</span>
@@ -678,45 +480,19 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <div className={`px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1 ${
+                  <div className={`px-3 py-1 rounded-full text-sm font-medium ${
                     cookieStatus?.hasCookies 
                       ? 'bg-green-100 text-green-800' 
                       : 'bg-amber-100 text-amber-800'
                   }`}>
-                    <Database className="h-3 w-3" />
                     {cookieStatus?.hasCookies ? 'Cookies Active' : 'No Cookies'}
                   </div>
-                  <div className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium flex items-center gap-1">
-                    <User className="h-3 w-3" />
+                  <div className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
                     Free Plan
                   </div>
                 </div>
               </div>
             </div>
-
-            {/* API Status Warning */}
-            {apiStatus && !apiStatus.available && (
-              <div className="mb-8 bg-red-50 border border-red-200 rounded-xl p-4">
-                <div className="flex items-start space-x-3">
-                  <Server className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="text-sm font-medium text-red-800">
-                      ⚠️ API Connection Issue
-                    </p>
-                    <p className="text-sm text-red-700 mt-1">
-                      {apiStatus.message}. The backend might be down or restarting.
-                    </p>
-                    <button 
-                      onClick={checkApiStatus}
-                      className="mt-2 text-sm text-red-600 hover:text-red-800 flex items-center gap-1"
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                      Retry Connection
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* Cookie Status */}
             <div className="mb-8">
@@ -746,7 +522,7 @@ export default function DashboardPage() {
                         <h3 className={`text-lg font-semibold ${
                           cookieStatus.hasCookies ? 'text-green-800' : 'text-amber-800'
                         }`}>
-                          {cookieStatus.hasCookies ? 'LinkedIn Cookies Active' : 'No Active Cookies'}
+                          {cookieStatus.message}
                         </h3>
                         <Link 
                           href="/cookies" 
@@ -756,39 +532,33 @@ export default function DashboardPage() {
                           <span>Manage</span>
                         </Link>
                       </div>
-                      <p className={`text-sm mt-1 ${
-                        cookieStatus.hasCookies ? 'text-green-700' : 'text-amber-700'
-                      }`}>
-                        {cookieStatus.message}
-                      </p>
                       <div className="mt-4 grid grid-cols-2 gap-4">
                         {cookieStatus.lastUpdated && (
                           <div>
-                            <p className="text-xs text-gray-500">Last Used</p>
+                            <p className="text-sm text-gray-500">Last Used</p>
                             <p className="text-sm font-medium text-gray-900">
                               {new Date(cookieStatus.lastUpdated).toLocaleDateString()}
                             </p>
                           </div>
                         )}
-                        {cookieStatus.cookieCount !== undefined && (
+                        {cookieStatus.cookieCount && (
                           <div>
-                            <p className="text-xs text-gray-500">Active Cookies</p>
+                            <p className="text-sm text-gray-500">Active Cookies</p>
                             <p className="text-sm font-medium text-gray-900">
-                              {cookieStatus.cookieCount} cookie{cookieStatus.cookieCount !== 1 ? 's' : ''}
+                              {cookieStatus.cookieCount} cookies
                             </p>
                           </div>
                         )}
                       </div>
                       {!cookieStatus.hasCookies && (
                         <div className="mt-4 p-4 bg-white rounded-lg border border-gray-200">
-                          <p className="text-sm text-amber-700 mb-2 font-medium">
-                            How to add LinkedIn cookies:
+                          <p className="text-sm text-amber-700 mb-2">
+                            To add LinkedIn cookies to the database:
                           </p>
                           <ol className="text-sm text-gray-600 space-y-1 list-decimal pl-4">
-                            <li>Log in to LinkedIn in Chrome</li>
-                            <li>Open DevTools (F12) → Application → Cookies</li>
-                            <li>Copy the "li_at" cookie value</li>
-                            <li>Go to the <Link href="/cookies" className="text-blue-600 hover:underline">Cookies page</Link> and add it</li>
+                            <li>Login to LinkedIn in Chrome</li>
+                            <li>Get your "li_at" cookie from DevTools</li>
+                            <li>Add it to the Cookies page</li>
                           </ol>
                         </div>
                       )}
@@ -806,9 +576,8 @@ export default function DashboardPage() {
                     <Globe className="h-6 w-6 text-white" />
                     <h2 className="text-2xl font-bold text-white">Start New Analysis</h2>
                   </div>
-                  <div className="text-sm text-blue-100 flex items-center gap-1">
-                    <Clock className="h-4 w-4" />
-                    {cookieStatus?.hasCookies ? 'Authenticated' : 'Login Required'}
+                  <div className="text-sm text-blue-100">
+                    Using authenticated browser
                   </div>
                 </div>
                 <p className="text-blue-100 mt-2">
@@ -832,8 +601,8 @@ export default function DashboardPage() {
                     <BarChart3 className="h-10 w-10 text-blue-600 animate-pulse" />
                   </div>
                   <h3 className="text-2xl font-bold text-gray-900 mb-2">Analysis in Progress</h3>
-                  <p className="text-gray-600 mb-1">Job ID: {activeJobId || 'Processing...'}</p>
-                  <p className="text-sm text-gray-500">Using queue system for background processing</p>
+                  <p className="text-gray-600 mb-1">Analyzing: {analysisProgress.currentUrl}</p>
+                  <p className="text-sm text-gray-500">Using database cookies for authentication</p>
                 </div>
 
                 <div className="space-y-4">
@@ -851,15 +620,15 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">1</div>
-                      <p className="text-sm text-gray-600 mt-1">Queue Job</p>
+                      <p className="text-sm text-gray-600 mt-1">Browser Opens</p>
                     </div>
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">2</div>
-                      <p className="text-sm text-gray-600 mt-1">Worker Start</p>
+                      <p className="text-sm text-gray-600 mt-1">LinkedIn Login</p>
                     </div>
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">3</div>
-                      <p className="text-sm text-gray-600 mt-1">Browser Open</p>
+                      <p className="text-sm text-gray-600 mt-1">Navigate</p>
                     </div>
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">4</div>
@@ -867,14 +636,16 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="mt-4 flex justify-center">
-                    <button
-                      onClick={cancelJob}
-                      className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition-colors"
-                    >
-                      Cancel Job
-                    </button>
-                  </div>
+                  {analysisProgress.browserVisible && (
+                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div className="flex items-center space-x-2">
+                        <AlertCircle className="h-5 w-5 text-amber-600" />
+                        <p className="text-sm text-amber-700">
+                          A Chrome browser window has opened. Please keep it visible and do not close it during analysis.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -890,21 +661,13 @@ export default function DashboardPage() {
                   </div>
                   <div className="flex-1">
                     <h3 className="text-lg font-semibold text-red-800 mb-2">Analysis Error</h3>
-                    <p className="text-red-700 mb-2">{error}</p>
-                    {errorDetails && (
-                      <div className="bg-red-100/50 p-3 rounded-lg mb-4">
-                        <p className="text-sm text-red-600">{errorDetails}</p>
-                      </div>
-                    )}
+                    <p className="text-red-700 mb-4">{error}</p>
                     <div className="flex space-x-3">
                       <button
-                        onClick={() => {
-                          setError(null);
-                          setErrorDetails(null);
-                        }}
+                        onClick={() => setError(null)}
                         className="px-4 py-2 bg-gradient-to-r from-red-600 to-pink-600 text-white text-sm font-medium rounded-lg hover:shadow-lg transition-all duration-300"
                       >
-                        Dismiss
+                        Try Again
                       </button>
                       <button
                         onClick={checkCookieStatus}
@@ -1072,7 +835,6 @@ export default function DashboardPage() {
                 <button 
                   onClick={loadAnalysisHistory}
                   className="p-1 hover:bg-gray-100 rounded-md transition-colors"
-                  title="Refresh history"
                 >
                   <RefreshCw className="h-4 w-4 text-gray-600" />
                 </button>
@@ -1113,7 +875,6 @@ export default function DashboardPage() {
                         <Link 
                           href={`/results/${analysis.id}`}
                           className="text-blue-600 hover:text-blue-800 flex items-center space-x-1"
-                          prefetch={false}
                         >
                           <ExternalLink className="h-3 w-3" />
                           <span>View</span>
