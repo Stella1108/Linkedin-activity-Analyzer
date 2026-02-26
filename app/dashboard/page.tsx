@@ -20,6 +20,11 @@ import {
 } from 'lucide-react';
 import { signOut, getCurrentUser } from '@/lib/supabase';
 
+// ==========================================================================
+// ✅ API Base URL - Using your VPS IP
+// ==========================================================================
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://76.13.101.148:3000';
+
 export default function DashboardPage() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -56,7 +61,7 @@ export default function DashboardPage() {
   const checkCookieStatus = async () => {
     setIsCheckingCookies(true);
     try {
-      const response = await fetch('/api/cookie-status');
+      const response = await fetch(`${API_BASE_URL}/api/cookie-status`);
       const data = await response.json();
       
       if (response.ok) {
@@ -90,7 +95,7 @@ export default function DashboardPage() {
 
   const loadAnalysisHistory = async () => {
     try {
-      const response = await fetch('/api/analyses/recent');
+      const response = await fetch(`${API_BASE_URL}/api/analyses/recent`);
       if (response.ok) {
         const data = await response.json();
         setAnalysisHistory(data);
@@ -102,7 +107,7 @@ export default function DashboardPage() {
 
   const storeScrapedData = async (result: ScrapeResult, profileUrl: string) => {
     try {
-      const response = await fetch('/api/analyses/store', {
+      const response = await fetch(`${API_BASE_URL}/api/analyses/store`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -136,7 +141,7 @@ export default function DashboardPage() {
     setResult(null);
     
     setAnalysisProgress({
-      message: 'Initializing browser...',
+      message: 'Initializing browser on VPS...',
       step: 1,
       totalSteps: 7,
       currentUrl: request.url,
@@ -160,7 +165,7 @@ export default function DashboardPage() {
         }
       });
 
-      const response = await fetch('/api/analyze', {
+      const response = await fetch(`${API_BASE_URL}/api/analyze`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -176,11 +181,11 @@ export default function DashboardPage() {
       }
 
       const steps = [
-        { message: 'Initializing browser...', step: 1 },
+        { message: 'Initializing browser on VPS...', step: 1 },
         { message: 'Logging into LinkedIn...', step: 2 },
         { message: 'Navigating to profile...', step: 3, browserVisible: true },
         { message: 'Loading page content...', step: 4 },
-        { message: 'Extracting data...', step: 5 },
+        { message: 'Extracting data from VPS...', step: 5 },
         { message: 'Processing results...', step: 6 },
         { message: 'Finalizing analysis...', step: 7 }
       ];
@@ -476,7 +481,7 @@ export default function DashboardPage() {
                     Welcome back, {currentUser.user_metadata?.name || currentUser.email?.split('@')[0]}
                   </h1>
                   <p className="text-gray-600">
-                    Professional LinkedIn engagement analytics using authenticated cookies
+                    Professional LinkedIn engagement analytics using VPS backend
                   </p>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -500,7 +505,7 @@ export default function DashboardPage() {
                 <div className="bg-white border border-gray-200 rounded-xl p-6">
                   <div className="flex items-center justify-center space-x-3">
                     <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-                    <span className="text-gray-600">Checking cookie status...</span>
+                    <span className="text-gray-600">Checking cookie status on VPS...</span>
                   </div>
                 </div>
               ) : cookieStatus && (
@@ -557,8 +562,9 @@ export default function DashboardPage() {
                           </p>
                           <ol className="text-sm text-gray-600 space-y-1 list-decimal pl-4">
                             <li>Login to LinkedIn in Chrome</li>
-                            <li>Get your "li_at" cookie from DevTools</li>
-                            <li>Add it to the Cookies page</li>
+                            <li>Open DevTools (F12) → Application → Cookies</li>
+                            <li>Copy the "li_at" cookie value</li>
+                            <li>Go to the <Link href="/cookies" className="text-blue-600 hover:underline">Cookies page</Link> and add it</li>
                           </ol>
                         </div>
                       )}
@@ -577,7 +583,7 @@ export default function DashboardPage() {
                     <h2 className="text-2xl font-bold text-white">Start New Analysis</h2>
                   </div>
                   <div className="text-sm text-blue-100">
-                    Using authenticated browser
+                    Using VPS backend
                   </div>
                 </div>
                 <p className="text-blue-100 mt-2">
@@ -600,9 +606,9 @@ export default function DashboardPage() {
                   <div className="w-20 h-20 mx-auto mb-4 bg-gradient-to-r from-blue-100 to-indigo-100 rounded-full flex items-center justify-center">
                     <BarChart3 className="h-10 w-10 text-blue-600 animate-pulse" />
                   </div>
-                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Analysis in Progress</h3>
+                  <h3 className="text-2xl font-bold text-gray-900 mb-2">Analysis in Progress on VPS</h3>
                   <p className="text-gray-600 mb-1">Analyzing: {analysisProgress.currentUrl}</p>
-                  <p className="text-sm text-gray-500">Using database cookies for authentication</p>
+                  <p className="text-sm text-gray-500">Using VPS backend for processing</p>
                 </div>
 
                 <div className="space-y-4">
@@ -620,7 +626,7 @@ export default function DashboardPage() {
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">1</div>
-                      <p className="text-sm text-gray-600 mt-1">Browser Opens</p>
+                      <p className="text-sm text-gray-600 mt-1">Browser Opens on VPS</p>
                     </div>
                     <div className="text-center p-4 bg-blue-50 rounded-lg">
                       <div className="text-2xl font-bold text-blue-600">2</div>
@@ -641,7 +647,7 @@ export default function DashboardPage() {
                       <div className="flex items-center space-x-2">
                         <AlertCircle className="h-5 w-5 text-amber-600" />
                         <p className="text-sm text-amber-700">
-                          A Chrome browser window has opened. Please keep it visible and do not close it during analysis.
+                          A Chrome browser window has opened on your VPS. Please wait while scraping completes.
                         </p>
                       </div>
                     </div>
@@ -692,7 +698,7 @@ export default function DashboardPage() {
                       </div>
                       <div>
                         <h3 className="text-2xl font-bold text-gray-900">{result.message || 'Analysis Complete'}</h3>
-                        <p className="text-gray-600">Data extracted and stored successfully</p>
+                        <p className="text-gray-600">Data extracted from VPS and stored successfully</p>
                       </div>
                     </div>
                     <div className="flex items-center space-x-3">
@@ -768,7 +774,7 @@ export default function DashboardPage() {
                 <div className="bg-white rounded-2xl shadow-lg border border-gray-200 overflow-hidden">
                   <div className="p-6 border-b border-gray-200">
                     <h3 className="text-xl font-bold text-gray-900">Analysis Results</h3>
-                    <p className="text-gray-600">Extracted data from LinkedIn</p>
+                    <p className="text-gray-600">Extracted data from LinkedIn via VPS</p>
                   </div>
                   <div className="p-6">
                     <ResultsTable data={getResultsTableData()} />
@@ -919,7 +925,7 @@ export default function DashboardPage() {
                   </div>
                   <div>
                     <p className="text-sm font-medium text-gray-900">Check Cookie Status</p>
-                    <p className="text-xs text-gray-500">Verify database connection</p>
+                    <p className="text-xs text-gray-500">Verify VPS connection</p>
                   </div>
                 </button>
                 
@@ -961,7 +967,7 @@ export default function DashboardPage() {
                   LinkedIn Analyzer
                 </span>
               </div>
-              <p className="text-gray-600 text-sm mt-2">Professional LinkedIn Analytics</p>
+              <p className="text-gray-600 text-sm mt-2">Powered by VPS Backend</p>
             </div>
             <div className="flex space-x-6">
               <Link href="/" className="text-gray-600 hover:text-blue-600 transition-colors text-sm">
