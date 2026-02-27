@@ -132,7 +132,7 @@ export class LinkedInScraper {
     return false;
   }
 
-  // ---------- INITIALIZATION (HEADLESS MODE - FIXED) ----------
+  // ---------- INITIALIZATION (HEADLESS MODE - UPDATED) ----------
   async initialize(profileData: LinkedInProfileData, targetUrl: string): Promise<{ browser: Browser; page: Page }> {
     this.profileData = profileData;
 
@@ -144,9 +144,9 @@ export class LinkedInScraper {
       throw new Error('Invalid li_at cookie format');
     }
 
-    // HEADLESS CONFIGURATION
+    // 🔁 UPDATED: headless set to 'new' (invisible mode) while keeping all enhancements
     const launchOptions: any = {
-      headless: 'new',
+      headless: 'new',  // 👈 now invisible again
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -200,16 +200,13 @@ export class LinkedInScraper {
       console.log('🍪 Cookies set');
       console.log('🌐 STEP 1: Navigating to LinkedIn FEED...');
       
-      // Use domcontentloaded instead of networkidle2 to avoid timeout
       await this.page.goto('https://www.linkedin.com/feed', {
         waitUntil: 'domcontentloaded',
-        timeout: 30000 // Reduced timeout
+        timeout: 30000
       });
       
-      // Wait for page to stabilize
       await this.delay(5000);
 
-      // Check if login was successful
       const currentUrl = this.page.url();
       if (currentUrl.includes('login') || currentUrl.includes('signin')) {
         throw new Error('Login failed - cookie may be expired');
@@ -218,16 +215,13 @@ export class LinkedInScraper {
 
       console.log(`\n🌐 STEP 2: Navigating to target profile: ${targetUrl}`);
       
-      // Navigate to profile with same strategy
       await this.page.goto(targetUrl, {
         waitUntil: 'domcontentloaded',
         timeout: 30000
       });
       
-      // Wait for profile to load
       await this.delay(5000);
 
-      // Try to wait for profile elements but don't fail if timeout
       try {
         await this.page.waitForSelector('h1', { timeout: 10000 });
         console.log('✅ Profile name found');
@@ -402,7 +396,7 @@ export class LinkedInScraper {
   }
 
   // ==========================================================================
-  // ✅ EXTRACT PROFILE URLs FROM MODAL
+  // ✅ EXTRACT PROFILE URLs FROM MODAL (now respects maxProfiles)
   // ==========================================================================
   private async extractProfileUrlsFromModal(
     postAuthor: string,
@@ -412,6 +406,7 @@ export class LinkedInScraper {
     if (!this.page) return [];
 
     console.log('\n🔗 Extracting profile URLs from likes modal...');
+    console.log(`   Will load up to ${maxProfiles} profiles (or all available).`);
 
     try {
       await this.page.waitForSelector('.artdeco-modal, [role="dialog"]', { timeout: 10000 });
@@ -426,7 +421,7 @@ export class LinkedInScraper {
     
     let previousCount = 0;
     let sameCountIterations = 0;
-    const maxScrollAttempts = 15;
+    const maxScrollAttempts = 30; // increased to allow deeper scrolling
     
     for (let scrollAttempt = 0; scrollAttempt < maxScrollAttempts; scrollAttempt++) {
       const currentCount = await this.page.evaluate(() => {
@@ -435,6 +430,7 @@ export class LinkedInScraper {
       
       console.log(`   📊 Scroll ${scrollAttempt + 1}/${maxScrollAttempts} - Profiles loaded: ${currentCount}`);
       
+      // Stop if we've reached the user-requested maximum
       if (currentCount >= maxProfiles) {
         console.log(`   ✅ Reached target count: ${currentCount}/${maxProfiles}`);
         break;
@@ -597,6 +593,7 @@ export class LinkedInScraper {
     try {
       console.log('   🔍 Searching for experience section...');
 
+      // Scroll down a few times to reveal the experience section
       for (let i = 0; i < 5; i++) {
         await page.evaluate(() => {
           window.scrollBy(0, 800);
@@ -707,7 +704,7 @@ export class LinkedInScraper {
   }
 
   // ==========================================================================
-  // ✅ SCRAPE PROFILE PAGE
+  // ✅ SCRAPE PROFILE PAGE (now with fallback to experience section)
   // ==========================================================================
   private async scrapeProfilePage(profileUrl: string): Promise<{
     name: string;
@@ -757,7 +754,7 @@ export class LinkedInScraper {
 
         await this.delay(3000);
 
-        // Extract profile data
+        // Extract profile data from the main page
         let profileData = await newPage.evaluate(() => {
           const getText = (selectors: string[]): string => {
             for (const selector of selectors) {
@@ -822,6 +819,7 @@ export class LinkedInScraper {
         let jobTitle = 'Not specified';
         let company = companyFromButton;
 
+        // Parse headline if present
         if (headline && headline !== 'Not specified') {
           console.log(`   📝 Headline: "${headline}"`);
           
@@ -834,6 +832,20 @@ export class LinkedInScraper {
             }
           } else {
             jobTitle = headline;
+          }
+        }
+
+        // ➕ ADDED: If jobTitle or company are still missing, try to extract from experience section
+        if (jobTitle === 'Not specified' || company === 'Not specified' || company === '') {
+          console.log('   ⚠️ Job title or company missing, attempting to extract from Experience section...');
+          const expData = await this.extractFromExperienceSection(newPage);
+          if (expData) {
+            if (jobTitle === 'Not specified' && expData.jobTitle) {
+              jobTitle = expData.jobTitle;
+            }
+            if (company === 'Not specified' && expData.company) {
+              company = expData.company;
+            }
           }
         }
 
@@ -906,7 +918,7 @@ export class LinkedInScraper {
   // ==========================================================================
   async scrapeProfileActivity(
     profileUrl: string,
-    maxLikes: number = 50
+    maxLikes: number = 50   // 👈 this is the user-controlled value
   ): Promise<ScrapeResult> {
     if (!this.browser || !this.page) {
       throw new Error('Scraper not initialized');
@@ -914,6 +926,7 @@ export class LinkedInScraper {
 
     console.log('\n' + '='.repeat(60));
     console.log('🎯 STARTING SCRAPING');
+    console.log(`📊 User requested up to ${maxLikes} profiles`);
     console.log('='.repeat(60));
 
     const result: ScrapeResult = {
@@ -945,6 +958,7 @@ export class LinkedInScraper {
         return result;
       }
 
+      // Pass maxLikes to the modal extraction so it stops scrolling when enough profiles are loaded
       const profileUrls = await this.extractProfileUrlsFromModal(
         button.author,
         button.likesCount,
